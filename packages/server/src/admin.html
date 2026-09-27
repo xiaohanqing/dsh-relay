@@ -1,0 +1,220 @@
+<!doctype html>
+<html lang="zh">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>dsh-relay 管理台</title>
+<style>
+:root{
+  --bg:#0f1420;--card:#181f2f;--card2:#1e2739;--line:#2a3450;
+  --fg:#e8ecf5;--dim:#8b96ad;--acc:#4f8cff;--ok:#34c07c;--bad:#e5604f;--warn:#e0a13c;
+  font-size:15px;
+}
+*{box-sizing:border-box}
+body{margin:0;background:var(--bg);color:var(--fg);font-family:system-ui,-apple-system,"PingFang SC","Microsoft YaHei",sans-serif;min-height:100vh;display:flex;justify-content:center;padding:32px 16px}
+.wrap{width:100%;max-width:860px}
+h1{font-size:1.25rem;margin:0 0 4px;display:flex;align-items:center;gap:10px}
+h1 .dot{width:9px;height:9px;border-radius:50%;background:var(--ok);box-shadow:0 0 8px var(--ok)}
+h1 .dot.bad{background:var(--bad);box-shadow:0 0 8px var(--bad)}
+.sub{color:var(--dim);font-size:.85rem;margin-bottom:24px}
+.card{background:var(--card);border:1px solid var(--line);border-radius:12px;padding:18px 20px;margin-bottom:18px}
+.card h2{font-size:.95rem;margin:0 0 12px;color:var(--dim);font-weight:600}
+.row{display:flex;gap:10px;flex-wrap:wrap;align-items:center}
+input{background:var(--card2);border:1px solid var(--line);border-radius:8px;color:var(--fg);padding:9px 12px;font-size:.95rem;outline:none;min-width:0}
+input:focus{border-color:var(--acc)}
+button{background:var(--acc);border:0;border-radius:8px;color:#fff;padding:9px 16px;font-size:.95rem;cursor:pointer}
+button:hover{filter:brightness(1.1)}
+button.ghost{background:transparent;border:1px solid var(--line);color:var(--dim)}
+button.danger{background:transparent;border:1px solid var(--bad);color:var(--bad)}
+button:disabled{opacity:.45;cursor:default}
+table{width:100%;border-collapse:collapse;font-size:.92rem}
+th{color:var(--dim);text-align:left;font-weight:500;padding:8px 6px;border-bottom:1px solid var(--line);font-size:.82rem}
+td{padding:10px 6px;border-bottom:1px solid var(--line)}
+tr:last-child td{border-bottom:0}
+.pill{display:inline-flex;align-items:center;gap:6px;padding:2px 10px;border-radius:999px;font-size:.8rem}
+.pill.on{background:rgba(52,192,124,.12);color:var(--ok)}
+.pill.off{background:rgba(229,96,79,.12);color:var(--bad)}
+.pill i{width:7px;height:7px;border-radius:50%;background:currentColor}
+.mono{font-family:ui-monospace,Menlo,Consolas,monospace;font-size:.85rem;color:var(--dim)}
+.stat{display:flex;gap:14px;flex-wrap:wrap;color:var(--dim);font-size:.85rem}
+.stat b{color:var(--fg);font-weight:600}
+.err{color:var(--bad);font-size:.85rem;margin-top:8px;min-height:1em}
+dialog{background:var(--card);color:var(--fg);border:1px solid var(--line);border-radius:12px;padding:22px;max-width:480px;width:92%}
+dialog::backdrop{background:rgba(0,0,0,.55)}
+.token-box{background:var(--card2);border:1px dashed var(--acc);border-radius:8px;padding:12px;font-family:ui-monospace,Menlo,monospace;font-size:.85rem;word-break:break-all;margin:12px 0}
+.hint{color:var(--dim);font-size:.82rem;line-height:1.6}
+.kv{display:flex;gap:8px;margin:4px 0}
+.kv span:first-child{color:var(--dim);flex:0 0 84px}
+.login-wrap{display:flex;justify-content:center;padding-top:12vh}
+.login-card{width:360px}
+@media (max-width:600px){td:nth-child(4),th:nth-child(4){display:none}}
+</style>
+</head>
+<body>
+<div class="wrap" id="app">
+  <!-- 登录视图 -->
+  <div class="login-wrap" id="loginView" hidden>
+    <div class="card login-card">
+      <h1><span class="dot"></span>dsh-relay 管理台</h1>
+      <p class="sub">输入管理员密码登录</p>
+      <input type="password" id="pwd" placeholder="管理员密码" style="width:100%" autocomplete="current-password">
+      <div class="err" id="loginErr"></div>
+      <button id="loginBtn" style="width:100%;margin-top:6px">登录</button>
+    </div>
+  </div>
+
+  <!-- 主视图 -->
+  <div id="mainView" hidden>
+    <h1><span class="dot" id="hdrDot"></span>dsh-relay 管理台
+      <button class="ghost" id="logoutBtn" style="margin-left:auto;padding:5px 12px;font-size:.82rem">退出</button>
+    </h1>
+    <p class="sub" id="serverInfo"></p>
+
+    <div class="card">
+      <h2>客户端</h2>
+      <table>
+        <thead><tr><th>名称</th><th>域名</th><th>隧道</th><th>手机 / 空闲池</th><th>Token</th><th></th></tr></thead>
+        <tbody id="clientRows"></tbody>
+      </table>
+      <div class="err" id="listErr"></div>
+    </div>
+
+    <div class="card">
+      <h2>添加客户端</h2>
+      <div class="row">
+        <input id="newId" placeholder="名称（如 home / office）" style="flex:1;min-width:160px">
+        <input id="newDomain" placeholder="域名（可选，如 dsh.example.com）" style="flex:2;min-width:200px">
+        <button id="addBtn">生成并添加</button>
+      </div>
+      <p class="hint" style="margin-bottom:0">域名用于手机侧路由：访问该域名的流量进这台电脑。留空则为默认客户端（裸 IP 访问落到它）。Token 只在生成时显示一次。</p>
+      <div class="err" id="addError"></div>
+    </div>
+  </div>
+</div>
+
+<dialog id="tokenDlg">
+  <h2 style="margin:0 0 8px;font-size:1rem">✅ 客户端已创建</h2>
+  <p class="hint">把下面的 Token 填到对应电脑的 DSH 插件设置页。<b>关闭后无法再次查看</b>（只能删除重建）。</p>
+  <div class="token-box" id="tokenText"></div>
+  <div class="row">
+    <button id="copyToken">复制 Token</button>
+    <button class="ghost" id="closeToken">我已保存，关闭</button>
+  </div>
+</dialog>
+
+<dialog id="confirmDlg">
+  <h2 style="margin:0 0 8px;font-size:1rem">删除客户端</h2>
+  <p class="hint" id="confirmText"></p>
+  <div class="row" style="margin-top:14px">
+    <button class="danger" id="confirmYes">确认删除</button>
+    <button class="ghost" id="confirmNo">取消</button>
+  </div>
+</dialog>
+
+<script>
+(function(){
+  const $ = (id) => document.getElementById(id);
+  let pendingRemove = null;
+
+  async function api(path, opts = {}) {
+    const res = await fetch(path, { headers: { 'content-type': 'application/json' }, ...opts });
+    let data = {};
+    try { data = await res.json(); } catch { /* 空 */ }
+    return { status: res.status, data };
+  }
+
+  function esc(s){ const d=document.createElement('i'); d.textContent=s==null?'':String(s); return d.innerHTML; }
+
+  function show(view){
+    $('loginView').hidden = view !== 'login';
+    $('mainView').hidden = view !== 'main';
+  }
+
+  async function refresh(){
+    const { status, data } = await api('/__relay/admin/api/overview');
+    if (status === 401) { show('login'); return; }
+    if (!data.ok) { $('listErr').textContent = '加载失败'; return; }
+    show('main');
+    $('hdrDot').className = 'dot' + (data.insecure ? ' bad' : '');
+    $('serverInfo').textContent =
+      data.server + ' · 运行 ' + Math.floor(data.uptime/60) + ' 分钟 · ' +
+      (data.insecure ? '⚠ 无 TLS（调试模式）' : 'TLS 已启用');
+    const tb = $('clientRows');
+    tb.innerHTML = data.clients.map((c) =>
+      '<tr>'
+      + '<td><b>' + esc(c.id) + '</b></td>'
+      + '<td>' + (c.domain ? '<span class="mono">' + esc(c.domain) + '</span>' : '<span class="hint">（默认·裸IP）</span>') + '</td>'
+      + '<td><span class="pill ' + (c.connected ? 'on' : 'off') + '"><i></i>' + (c.connected ? '已连接' : '离线') + '</span></td>'
+      + '<td class="mono">' + c.phone + ' / ' + c.idle + '</td>'
+      + '<td class="mono">' + esc(c.tokenHint) + '</td>'
+      + '<td style="text-align:right"><button class="danger" data-del="' + esc(c.id) + '" style="padding:4px 10px;font-size:.8rem">删除</button></td>'
+      + '</tr>').join('');
+    for (const b of tb.querySelectorAll('[data-del]')) {
+      b.onclick = () => askRemove(b.getAttribute('data-del'));
+    }
+    $('addBtn').disabled = !data.mutable;
+  }
+
+  async function login(){
+    $('loginErr').textContent = '';
+    $('loginBtn').disabled = true;
+    try {
+      const { status, data } = await api('/__relay/admin/api/login', {
+        method: 'POST', body: JSON.stringify({ password: $('pwd').value }),
+      });
+      if (status === 200) { $('pwd').value = ''; refresh(); }
+      else if (data.error === 'locked') $('loginErr').textContent = '尝试过多，请 ' + data.retryAfter + ' 秒后再试';
+      else $('loginErr').textContent = '密码错误';
+    } finally { $('loginBtn').disabled = false; }
+  }
+
+  async function addClient(){
+    $('addError').textContent = '';
+    $('addBtn').disabled = true;
+    try {
+      const { status, data } = await api('/__relay/admin/api/clients/add', {
+        method: 'POST',
+        body: JSON.stringify({ id: $('newId').value.trim(), domain: $('newDomain').value.trim() }),
+      });
+      if (status === 200 && data.ok) {
+        $('tokenText').textContent = data.token;
+        $('tokenDlg').showModal();
+        $('newId').value = ''; $('newDomain').value = '';
+        refresh();
+      } else {
+        $('addError').textContent = data.message || data.error || '添加失败';
+      }
+    } finally { $('addBtn').disabled = false; }
+  }
+
+  function askRemove(id){
+    pendingRemove = id;
+    $('confirmText').textContent = '确定删除客户端「' + id + '」？它的隧道会立刻断开，且 Token 作废。';
+    $('confirmDlg').showModal();
+  }
+
+  async function doRemove(){
+    if (!pendingRemove) return;
+    await api('/__relay/admin/api/clients/remove', { method: 'POST', body: JSON.stringify({ id: pendingRemove }) });
+    pendingRemove = null;
+    $('confirmDlg').close();
+    refresh();
+  }
+
+  $('loginBtn').onclick = login;
+  $('pwd').addEventListener('keydown', (e) => { if (e.key === 'Enter') login(); });
+  $('addBtn').onclick = addClient;
+  $('logoutBtn').onclick = async () => { await api('/__relay/admin/api/logout', { method: 'POST' }); show('login'); };
+  $('copyToken').onclick = async () => {
+    try { await navigator.clipboard.writeText($('tokenText').textContent); $('copyToken').textContent = '已复制'; setTimeout(() => { $('copyToken').textContent = '复制 Token'; }, 1500); } catch { /* 剪贴板不可用 */ }
+  };
+  $('closeToken').onclick = () => $('tokenDlg').close();
+  $('confirmYes').onclick = doRemove;
+  $('confirmNo').onclick = () => { pendingRemove = null; $('confirmDlg').close(); };
+
+  refresh();
+  setInterval(refresh, 5000);
+})();
+</script>
+</body>
+</html>

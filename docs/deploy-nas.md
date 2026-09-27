@@ -67,17 +67,19 @@ DSH 设置页 → DSH Relay：
 
 ## 5. 多客户端（可选）：一个服务端带多台电脑
 
-一个服务端可以同时服务任意多台 DSH（协议 v1.1 多租户）。每个客户端一条独立 token，
-手机侧按域名路由：
+一个服务端可以同时服务任意多台 DSH（协议 v1.1 多租户）。**推荐直接用网页管理台**：
+
+浏览器打开 `http://<NAS地址>:8443/__relay/admin`（首次密码看
+`docker compose logs relay | grep "admin password"`，之后存在 `data/admin-password`）。
+页面上可以看每个客户端的在线状态、添加客户端（自动生成 token，只在生成时显示一次）、
+删除客户端——全程不用 SSH。
+
+CLI 等价方式：
 
 ```bash
 cd packages/server
-cp clients.json.example clients.json
-# 加第一个客户端（token 会打印出来，填到对应电脑的插件设置页）：
+# 加一个客户端（token 会打印出来，填到对应电脑的插件设置页）：
 docker compose run --rm relay node src/server.mjs add-client /data/clients.json home dsh.example.com
-# 再加一台：
-docker compose run --rm relay node src/server.mjs add-client /data/clients.json office office.example.com
-docker compose restart relay
 ```
 
 规则：

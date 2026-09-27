@@ -5,12 +5,15 @@
 #    b) 用 certbot（本 compose 文件带了一个可选服务，走 80 端口 HTTP-01）
 #    c) 测试体验（不安全，勿长期使用）：删掉下面 RELAY_TLS_CERT/RELAY_TLS_KEY
 #       两个环境变量，服务端自动退化为无 TLS 模式（协议行为不变，仅少了加密层）
-# 2. 准备客户端注册表：cp clients.json.example clients.json，然后
-#    docker compose run --rm relay node src/server.mjs add-client /data/clients.json home dsh.example.com
-#    （每执行一次加一个客户端，token 会打印出来，填进对应电脑的插件设置页）
-# 3. 路由器转发：外部 443 → NAS 8443；首次签证书还需 外部 80 → NAS 80
-# 4. docker compose up -d
-# 5. 各电脑的 DSH 插件设置页填：服务端地址 = 该客户端的域名，token = 第 2 步打印的值
+# 2. 启动：docker compose up -d --build
+#    管理密码自动生成：docker compose logs relay | grep "admin password"
+# 3. 打开管理台（手机/电脑浏览器）：http://<NAS地址>:8443/__relay/admin
+#    页面上添加客户端（生成 token）、删除客户端，无需 SSH。
+# 4. 路由器转发：外部 443 → NAS 8443；首次签证书还需 外部 80 → NAS 80
+# 5. 各电脑的 DSH 插件设置页填：服务端地址 = 该客户端的域名，token = 管理台生成的值
+#
+# 也可用 CLI 管理注册表（与页面等价）：
+#   docker compose run --rm relay node src/server.mjs add-client /data/clients.json <id> [domain]
 
 services:
   relay:
@@ -18,17 +21,19 @@ services:
     image: dsh-relay-server
     restart: unless-stopped
     ports:
-      - "8443:8443"   # 手机 + 插件入口（TLS）
+      - "8443:8443"   # 手机 + 插件入口（TLS）+ 管理台 /__relay/admin
     environment:
       RELAY_PORT: "8443"
       RELAY_CLIENTS_FILE: /data/clients.json
-      # 简易模式（单客户端）：不挂 clients.json，注释上一行并改用——
+      RELAY_ADMIN_PASSWORD_FILE: /data/admin-password
+      # 简易模式（单客户端 + 固定管理密码）：注释上面两行，改用——
       # RELAY_TOKEN: ${RELAY_TOKEN:?请在 .env 里设置 RELAY_TOKEN}
+      # RELAY_ADMIN_PASSWORD: your-admin-password
       RELAY_TLS_CERT: /certs/fullchain.pem
       RELAY_TLS_KEY: /certs/privkey.pem
     volumes:
+      - ./data:/data          # 注册表 + 管理密码（可写）
       - ./certs:/certs:ro
-      - ./clients.json:/data/clients.json:ro
 
   # 可选：签发/续期 Let's Encrypt 证书（HTTP-01，需要 80 端口）
   # 首次运行：docker compose run --rm certbot certonly --standalone \

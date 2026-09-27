@@ -14,7 +14,7 @@ import tls from 'node:tls';
 import http from 'node:http';
 import crypto from 'node:crypto';
 import net from 'node:net';
-import { readFileSync, writeFileSync, existsSync } from 'node:fs';
+import { readFileSync, writeFileSync, renameSync, existsSync } from 'node:fs';
 import { WebSocketServer, WebSocket } from 'ws';
 
 const PKG_VERSION = (() => {
@@ -31,6 +31,8 @@ const defaults = {
   clientsFile: (process.env.RELAY_CLIENTS_FILE ?? '').trim(),
   token: (process.env.RELAY_TOKEN ?? '').trim(), // 向后兼容：单客户端部署
   tokenFile: (process.env.RELAY_TOKEN_FILE ?? '').trim(),
+  adminPassword: (process.env.RELAY_ADMIN_PASSWORD ?? '').trim(), // WebUI 管理密码
+  adminPasswordFile: (process.env.RELAY_ADMIN_PASSWORD_FILE ?? '').trim(),
   tlsCert: (process.env.RELAY_TLS_CERT ?? '').trim(),
   tlsKey: (process.env.RELAY_TLS_KEY ?? '').trim(),
   poolHint: Number(process.env.RELAY_POOL_HINT ?? 8), // 建议插件维持的池大小（hello 里带给插件）
@@ -145,6 +147,224 @@ export function createRelayServer(overrides = {}) {
     try { s.ctl?.send(JSON.stringify(obj)); } catch { /* 连接正断 */ }
   }
 
+  // ---------- 管理面（WebUI + API，路径 /__relay/admin/*） ----------
+  // 管理密码：env > 文件 > 自动生成落盘（日志打印一次）。与插件 token、手机 PIN 完全独立。
+  let adminPassword = cfg.adminPassword;
+  if (!adminPassword && cfg.adminPasswordFile) {
+    try { adminPassword = readFileSync(cfg.adminPasswordFile, 'utf8').trim(); } catch { adminPassword = ''; }
+    if (!adminPassword) {
+      adminPassword = crypto.randomBytes(12).toString('base64url');
+      try {
+        writeFileSync(cfg.adminPasswordFile, `${adminPassword}\n`, { mode: 0o600 });
+        log(`admin password generated -> ${cfg.adminPasswordFile}: ${adminPassword}`);
+      } catch {
+        log(`admin password (ephemeral! 无法写入 ${cfg.adminPasswordFile}): ${adminPassword}`);
+      }
+    }
+  }
+  if (!adminPassword) {
+    adminPassword = crypto.randomBytes(12).toString('base64url');
+    log(`admin password (ephemeral! 未配置 RELAY_ADMIN_PASSWORD[_FILE]): ${adminPassword}`);
+  }
+  const adminCookieValue = crypto.createHash('sha256').update(`dsh-relay-admin|${adminPassword}`).digest('hex');
+  // 只有注册表来自文件时才允许页面增删（回写才有落点）
+  const adminMutable = !!cfg.clientsFile;
+
+  /** 关闭某客户端的全部连接（页面删除客户端时调用）。 */
+  function closeSession(s) {
+    try { s.ctl?.close(1001, 'client removed'); } catch { /* 忽略 */ }
+    for (const conn of [...s.phoneConns.values()]) {
+      try { conn.ws.close(1001, 'client removed'); } catch { /* 忽略 */ }
+      try { conn.peer.destroy(); } catch { /* 忽略 */ }
+    }
+    for (const ws of [...s.idleData]) { try { ws.close(1001, 'client removed'); } catch { /* 忽略 */ } }
+    s.idleData.clear();
+    s.phoneConns.clear();
+    s.ctl = null;
+  }
+
+  /** 运行时应用新注册表：新增/更新/删除客户端，返回被删除的 id 列表（日志用）。 */
+  function applyRegistry(nextRaw) {
+    const next = normalizeClients(nextRaw);
+    const nextIds = new Set(next.map((c) => c.id));
+    for (const [id, s] of [...sessions]) {
+      if (!nextIds.has(id)) { closeSession(s); sessions.delete(id); }
+    }
+    const rebuilt = [];
+    for (const c of next) {
+      const cur = sessions.get(c.id);
+      if (cur) { cur.token = c.token; cur.domain = c.domain; }
+      else {
+        sessions.set(c.id, {
+          ...c, startedAt: Date.now(), connIdSeq: 0, ctl: null,
+          phoneConns: new Map(), idleData: new Set(),
+        });
+      }
+      rebuilt.push(sessions.get(c.id));
+    }
+    registry.length = 0;
+    registry.push(...rebuilt);
+  }
+
+  /** 注册表原子回写（tmp + rename）。仅在 clientsFile 模式下可用。 */
+  function persistClients() {
+    if (!cfg.clientsFile) throw new Error('注册表不可持久化（未配置 RELAY_CLIENTS_FILE）');
+    const body = JSON.stringify({
+      clients: registry.map((c) => ({ id: c.id, token: c.token, ...(c.domain ? { domain: c.domain } : {}) })),
+    }, null, 2);
+    writeFileSync(`${cfg.clientsFile}.tmp`, `${body}\n`, { mode: 0o600 });
+    renameSync(`${cfg.clientsFile}.tmp`, cfg.clientsFile);
+  }
+
+  // 登录失败限速（与插件 token 限速独立）
+  const adminFails = new Map();
+  function adminLockCheck(ip) {
+    const now = Date.now();
+    const rec = adminFails.get(ip);
+    if (rec?.lockedUntil > now) return { locked: true, retryAfter: Math.ceil((rec.lockedUntil - now) / 1000) };
+    return { locked: false, retryAfter: 0 };
+  }
+  function recordAdminFail(ip) {
+    const now = Date.now();
+    let rec = adminFails.get(ip);
+    if (!rec || now - rec.windowStart > 60_000) rec = { count: 0, windowStart: now, lockedUntil: 0 };
+    rec.count += 1;
+    if (rec.count >= 5) rec.lockedUntil = now + 300_000; // 管理面锁更狠：5 分钟
+    adminFails.set(ip, rec);
+    if (adminFails.size > 1000) {
+      for (const [k, v] of adminFails) if (now - v.windowStart > 600_000) adminFails.delete(k);
+    }
+  }
+
+  const ADMIN_HTML = readFileSync(new URL('./admin.html', import.meta.url), 'utf8');
+
+  function adminAuthed(req) {
+    const m = /(?:^|;\s*)dsh_relay_admin=([A-Za-z0-9]+)/.exec(String(req.headers.cookie ?? ''));
+    return !!m && tokenEqual(m[1], adminCookieValue);
+  }
+  function readBody(req, max = 64 * 1024) {
+    return new Promise((resolve, reject) => {
+      let size = 0;
+      const chunks = [];
+      req.on('data', (d) => {
+        size += d.length;
+        if (size > max) { reject(new Error('body too large')); req.destroy(); return; }
+        chunks.push(d);
+      });
+      req.on('end', () => resolve(Buffer.concat(chunks).toString('utf8')));
+      req.on('error', reject);
+    });
+  }
+  function json(res, code, obj, headers = {}) {
+    const body = JSON.stringify(obj);
+    res.writeHead(code, { 'content-type': 'application/json; charset=utf-8', 'content-length': Buffer.byteLength(body), ...headers });
+    res.end(body);
+  }
+  function parseJsonSafe(text) {
+    try { return JSON.parse(text || '{}'); } catch { return null; }
+  }
+  function cloneRegistry() {
+    return registry.map((c) => ({ id: c.id, token: c.token, domain: c.domain }));
+  }
+
+  async function adminRequest(req, res) {
+    const url = new URL(req.url ?? '/', 'http://x');
+    const p = url.pathname;
+    if (p === '/__relay/admin' || p === '/__relay/admin/') {
+      res.writeHead(200, { 'content-type': 'text/html; charset=utf-8', 'cache-control': 'no-store' });
+      res.end(ADMIN_HTML);
+      return;
+    }
+    if (!p.startsWith('/__relay/admin/api/')) { json(res, 404, { ok: false, error: 'not-found' }); return; }
+
+    if (p === '/__relay/admin/api/login' && req.method === 'POST') {
+      const ip = req.socket.remoteAddress ?? 'unknown';
+      const lock = adminLockCheck(ip);
+      if (lock.locked) { json(res, 429, { ok: false, error: 'locked', retryAfter: lock.retryAfter }); return; }
+      const body = parseJsonSafe(await readBody(req));
+      if (!body || !tokenEqual(String(body.password ?? ''), adminPassword)) {
+        recordAdminFail(ip);
+        log(`admin auth failed from ${ip}`);
+        json(res, 401, { ok: false, error: 'wrong-password' });
+        return;
+      }
+      adminFails.delete(ip);
+      json(res, 200, { ok: true }, {
+        'set-cookie': `dsh_relay_admin=${adminCookieValue}; Path=/__relay/admin; HttpOnly; SameSite=Strict; Max-Age=604800`,
+      });
+      return;
+    }
+    if (p === '/__relay/admin/api/logout' && req.method === 'POST') {
+      json(res, 200, { ok: true }, { 'set-cookie': 'dsh_relay_admin=; Path=/__relay/admin; HttpOnly; SameSite=Strict; Max-Age=0' });
+      return;
+    }
+
+    if (!adminAuthed(req)) { json(res, 401, { ok: false, error: 'unauthorized' }); return; }
+
+    if (p === '/__relay/admin/api/overview' && req.method === 'GET') {
+      json(res, 200, {
+        ok: true,
+        server: `dsh-relay-server/${PKG_VERSION}`,
+        insecure: !buildTlsOptions(),
+        mutable: adminMutable,
+        uptime: Math.floor((Date.now() - state.startedAt) / 1000),
+        clients: registry.map((c) => {
+          const s = sessions.get(c.id);
+          return {
+            id: c.id,
+            domain: c.domain,
+            connected: !!s?.ctl,
+            phone: s?.phoneConns.size ?? 0,
+            idle: s?.idleData.size ?? 0,
+            tokenHint: `${c.token.slice(0, 6)}…`,
+          };
+        }),
+      });
+      return;
+    }
+    if (p === '/__relay/admin/api/clients/add' && req.method === 'POST') {
+      if (!adminMutable) { json(res, 400, { ok: false, error: 'not-mutable', message: '需以 RELAY_CLIENTS_FILE 方式启动才能在页面增删客户端' }); return; }
+      const body = parseJsonSafe(await readBody(req));
+      if (!body) { json(res, 400, { ok: false, error: 'bad-json' }); return; }
+      const id = String(body.id ?? '').trim();
+      const domain = String(body.domain ?? '').trim();
+      const token = crypto.randomBytes(24).toString('hex');
+      const prev = cloneRegistry();
+      try {
+        applyRegistry([...prev, { id, token, domain }]);
+        persistClients();
+      } catch (e) {
+        applyRegistry(prev);
+        try { persistClients(); } catch { /* 回写失败保持旧盘上内容即可 */ }
+        json(res, 400, { ok: false, error: 'invalid', message: e.message });
+        return;
+      }
+      log(`admin: client "${id}" added (domain=${domain || '(default 裸IP)'})`);
+      json(res, 200, { ok: true, token }); // token 只在这里完整返回一次
+      return;
+    }
+    if (p === '/__relay/admin/api/clients/remove' && req.method === 'POST') {
+      if (!adminMutable) { json(res, 400, { ok: false, error: 'not-mutable', message: '需以 RELAY_CLIENTS_FILE 方式启动才能在页面增删客户端' }); return; }
+      const body = parseJsonSafe(await readBody(req));
+      const id = String(body?.id ?? '');
+      if (registry.length <= 1) { json(res, 400, { ok: false, error: 'last-client', message: '至少保留一个客户端' }); return; }
+      if (!sessions.has(id)) { json(res, 404, { ok: false, error: 'no-such-client' }); return; }
+      const prev = cloneRegistry();
+      try {
+        applyRegistry(prev.filter((c) => c.id !== id));
+        persistClients();
+      } catch (e) {
+        applyRegistry(prev);
+        json(res, 500, { ok: false, error: 'persist-failed', message: e.message });
+        return;
+      }
+      log(`admin: client "${id}" removed`);
+      json(res, 200, { ok: true });
+      return;
+    }
+    json(res, 404, { ok: false, error: 'not-found' });
+  }
+
   // ---------- token 失败限速（按来源 IP） ----------
   const tokenFails = new Map();
   function failLockCheck(ip) {
@@ -236,10 +456,11 @@ export function createRelayServer(overrides = {}) {
     }
   }
 
-  // 内部 http server：只服务插件 WS upgrade（嗅探后的连接经本地桥接进来）
+  // 内部 http server：插件 WS upgrade + 管理 WebUI/API（嗅探后的连接经本地桥接进来）
   const internal = http.createServer((req, res) => {
-    res.writeHead(404, { 'content-type': 'application/json' });
-    res.end('{"error":"not-found"}');
+    adminRequest(req, res).catch(() => {
+      try { json(res, 500, { ok: false, error: 'internal' }); } catch { /* 已响应 */ }
+    });
   });
   internal.on('upgrade', handleUpgrade);
 
