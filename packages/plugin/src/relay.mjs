@@ -238,9 +238,11 @@ export class RelayClient {
       return;
     }
     this.pool.add(ws);
+    ws._opened = false;
 
     ws.on('open', () => {
       // 成功即复位池级退避（目标恢复，可以全速补池）
+      ws._opened = true;
       this.dataAttempt = 0;
       this.dataInflight--;
     });
@@ -272,6 +274,9 @@ export class RelayClient {
       dead = true;
       this.pool.delete(ws);
       if (ws._local) { try { ws._local.destroy(); } catch { /* 忽略 */ } ws._local = null; }
+      // 没 open 过的连接必须归还 in-flight 名额，否则失败次数多了
+      // dataInflight 永久涨满 → 数据池瘫痪（本bug在 NAS 实测踩中）
+      if (!ws._opened) this.dataInflight = Math.max(0, this.dataInflight - 1);
       if (this.stopped) return;
       if (ws._consumed) return; // 绑定时已补过新连接
       // 退避挂在池级计数上：未成功 open 的失败逐次升级（封顶 10s），成功后复位
