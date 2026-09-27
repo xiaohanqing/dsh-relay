@@ -1,0 +1,30 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - name: Install deps
+        run: |
+          npm install --prefix packages/plugin
+          npm install --prefix packages/server
+      - name: Syntax check all sources
+        run: |
+          for f in $(find packages -name "*.mjs" -o -name "*.js" | grep -v node_modules | grep -v "client/client.js"); do
+            node --check "$f"
+          done
+      - name: Build client bundle
+        run: npm run build:client --prefix packages/plugin
+      - name: Test server
+        run: npm test --prefix packages/server
+      - name: Test plugin
+        run: npm test --prefix packages/plugin

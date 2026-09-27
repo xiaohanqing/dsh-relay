@@ -1,0 +1,4 @@
+# dsh-relay 插件挂载配置（由 dsh plugin add 自动应用，或手动加进 profile 的 cordis.patch.yml）
+- insert:
+    - id: dsh-relay
+      name: 'dsh-relay'

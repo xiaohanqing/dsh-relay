@@ -1,0 +1,38 @@
+{
+  "name": "dsh-relay-server",
+  "description": "dsh-relay 的 NAS 服务端：单端口 TLS 中继，配合 DSH 插件 dsh-relay 使用，把家里电脑上的 DSH 安全地暴露给手机。",
+  "type": "module",
+  "main": "src/server.mjs",
+  "bin": {
+    "dsh-relay-server": "src/server.mjs"
+  },
+  "files": [
+    "src",
+    "README.md",
+    "LICENSE"
+  ],
+  "scripts": {
+    "start": "node src/server.mjs",
+    "test": "node --test --test-timeout=60000 \"test/*.test.mjs\""
+  },
+  "dependencies": {
+    "ws": "^8.18.0"
+  },
+  "engines": {
+    "node": ">=22"
+  },
+  "license": "MIT",
+  "keywords": [
+    "dsh-relay",
+    "relay",
+    "tunnel",
+    "self-hosted",
+    "nas"
+  ],
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/xiaohanqing/dsh-relay.git",
+    "directory": "packages/server"
+  },
+  "version": "0.1.0"
+}

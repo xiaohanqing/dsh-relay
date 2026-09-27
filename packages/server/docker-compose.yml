@@ -1,0 +1,38 @@
+# dsh-relay-server 部署（NAS）
+#
+# 1. 准备 TLS 证书（三选一，见 docs/deploy-nas.md）：
+#    a) 已有证书：放到 ./certs/fullchain.pem 与 ./certs/privkey.pem
+#    b) 用 certbot（本 compose 文件带了一个可选服务，走 80 端口 HTTP-01）
+#    c) 测试体验：RELAY_INSECURE=1（不安全，勿长期使用）
+# 2. 生成 token：openssl rand -hex 24，写进 .env（RELAY_TOKEN=...）
+# 3. 路由器转发：外部 443 → NAS 8443；首次签证书还需 外部 80 → NAS 80
+# 4. docker compose up -d
+# 5. DSH 插件设置页填：服务端地址 = 你的域名（或 域名:8443），token = 第 2 步的值
+
+services:
+  relay:
+    build: .
+    image: dsh-relay-server
+    restart: unless-stopped
+    ports:
+      - "8443:8443"   # 手机 + 插件入口（TLS）
+    environment:
+      RELAY_PORT: "8443"
+      RELAY_TOKEN: ${RELAY_TOKEN:?请在 .env 里设置 RELAY_TOKEN}
+      RELAY_TLS_CERT: /certs/fullchain.pem
+      RELAY_TLS_KEY: /certs/privkey.pem
+    volumes:
+      - ./certs:/certs:ro
+
+  # 可选：签发/续期 Let's Encrypt 证书（HTTP-01，需要 80 端口）
+  # 首次运行：docker compose run --rm certbot certonly --standalone \
+  #   -d dsh.example.com --email you@example.com --agree-tos --no-eff-email
+  # 证书输出在 ./certs/live/<域名>/，把 fullchain.pem/privkey.pem 软链或复制到 ./certs/
+  # 续期：crontab 里加 `docker compose run --rm certbot renew && docker compose restart relay`
+  # certbot:
+  #   image: certbot/certbot
+  #   entrypoint: sh -c 'trap exit TERM; while :; do certbot renew --standalone; sleep 12h & wait $${!}; done'
+  #   ports:
+  #     - "80:80"
+  #   volumes:
+  #     - ./certs:/etc/letsencrypt

@@ -1,0 +1,7 @@
+node_modules/
+*.log
+.env
+certs/
+dist/
+client/client.js.bak
+.DS_Store
