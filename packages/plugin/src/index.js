@@ -91,6 +91,14 @@ export function apply(ctx, config = {}, internals = {}) {
     getPins: () => ({ public: getPin('public'), lan: getPin('lan') }),
     isPinCustom: (kind) => pinCustom(kind),
     getRelayConfig: () => ({ url: relayUrl(), token: relayToken(), enabled: relayEnabled() }),
+    saveRelayConfig: async ({ url, token }) => {
+      if (url !== undefined && url !== '') setRelayUrl(url);
+      if (token !== undefined && token !== '') setRelayToken(token);
+      setRelayEnabled(true);
+    },
+    pluginVersion: (() => {
+      try { return JSON.parse(readFileSync(new URL('../package.json', import.meta.url), 'utf8')).version; } catch { return ''; }
+    })(),
     onRelayReady: () => {
       logger.info('dsh-relay: relay ready | NAS 中继已就绪');
     },
@@ -153,6 +161,17 @@ export function apply(ctx, config = {}, internals = {}) {
         }
         return await statusPayload();
       }
+
+      case 'relay.enroll': {
+        const url = String(payload?.url ?? '').trim();
+        if (!url) return fail('请填写服务端地址 | server address required');
+        try { void service.enroll(url, String(payload?.code ?? '')); } catch (err) { return fail(err?.message ?? String(err)); }
+        return await statusPayload();
+      }
+
+      case 'relay.enroll.cancel':
+        service.enrollCancel();
+        return await statusPayload();
 
       case 'lan.setEnabled':
         setLanEnabled(payload?.on === true);

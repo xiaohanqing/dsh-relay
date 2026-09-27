@@ -17,7 +17,7 @@
   ],
   "scripts": {
     "build:client": "node client/build.mjs",
-    "test": "node --test --test-timeout=60000 \"test/*.test.mjs\"",
+    "test": "node --test --test-timeout=60000 --test-force-exit \"test/*.test.mjs\"",
     "test:worst": "node test-local/worst-case.mjs"
   },
   "dependencies": {
@@ -51,7 +51,7 @@
     "url": "https://github.com/xiaohanqing/dsh-relay/issues"
   },
   "homepage": "https://github.com/xiaohanqing/dsh-relay#readme",
-  "version": "0.1.0",
+  "version": "0.3.0",
   "dsh": {
     "bundle": {
       "patch": "./cordis.patch.yml"

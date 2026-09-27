@@ -43,6 +43,14 @@ const zh = {
   retryInfo: '第 {n} 次重试 · 约 {s} 秒后自动重试',
   adv: '高级',
   advAddress: '局域网地址',
+  enrollTitle: '一键接入（推荐）',
+  enrollCodeLabel: '邀请码（服务端开启时必填）',
+  enrollCodePh: '没有可留空',
+  enrollBtn: '申请接入',
+  enrollHint: '管理员在 NAS 管理台批准后自动完成配置，无需复制 Token',
+  enrollBack: '← 返回一键接入',
+  manualToken: '手动填写 Token（高级）',
+  cancelEnroll: '取消申请',
   auto: '自动选择',
   reset: '恢复出厂',
   resetDesc: '清空本插件全部设置并重置密码（不影响 DSH 其它数据）',
@@ -90,6 +98,14 @@ const en = {
   retryInfo: 'retry #{n} in ~{s}s',
   adv: 'Advanced',
   advAddress: 'LAN address',
+  enrollTitle: 'One-click join (recommended)',
+  enrollCodeLabel: 'Invite code (if required by the server)',
+  enrollCodePh: 'leave empty if none',
+  enrollBtn: 'Request access',
+  enrollHint: 'Approve it in the NAS admin console — no token copy-paste needed',
+  enrollBack: '← Back to one-click join',
+  manualToken: 'Enter token manually (advanced)',
+  cancelEnroll: 'Cancel request',
   auto: 'Auto',
   reset: 'Factory reset',
   resetDesc: 'Clears all plugin settings and resets PINs (DSH data untouched)',
@@ -189,6 +205,35 @@ function RelaySettingsTab({ rpcCall, t }) {
 
   const wanOn = st?.relayRunning === true;
   const wanConfigured = Boolean(cfg.url);
+  const enroll = st?.enroll ?? { phase: 'idle', detail: '' };
+
+  // —— 一键接入（准入审批）——
+  const [enrollForm, setEnrollForm] = useState({ url: '', code: '' });
+  const [manualMode, setManualMode] = useState(false);
+  const doEnroll = () => {
+    if (!enrollForm.url) return;
+    void apply(() => call(RELAY_ENDPOINTS.relayEnroll, { url: enrollForm.url, code: enrollForm.code }));
+  };
+  const enrollActive = ['submitting', 'pending', 'approved'].includes(enroll.phase);
+  const enrollStatusLine = (enroll.phase === 'idle' || !enroll.detail) ? null
+    : enroll.phase === 'done' || enroll.phase === 'approved'
+      ? h('div', { style: { color: 'var(--dsw-alias-state-success-primary,#16a34a)', fontSize: 12, marginTop: 8 } }, '✓ ' + errText(enroll.detail))
+      : h('div', { style: { marginTop: 8 } },
+        h('div', { style: enrollActive ? S.warn : S.err }, errText(enroll.detail)),
+        enrollActive ? h('button', { style: { ...S.mini, marginTop: 6 }, onClick: () => apply(() => call(RELAY_ENDPOINTS.relayEnrollCancel, {})) }, t('cancelEnroll')) : null);
+  const enrollFormBlock = h('div', null,
+    h('div', { style: { fontWeight: 600, fontSize: 13, marginBottom: 8 } }, t('enrollTitle')),
+    h('div', { style: S.field }, t('cfgStep1')),
+    h('input', { style: S.input, placeholder: t('serverPlaceholder'), value: enrollForm.url, autoFocus: true,
+      onChange: (e) => setEnrollForm((c) => ({ ...c, url: e.target.value.trim() })) }),
+    h('div', { style: { ...S.field, marginTop: 8 } }, t('enrollCodeLabel')),
+    h('input', { style: S.input, placeholder: t('enrollCodePh'), value: enrollForm.code,
+      onChange: (e) => setEnrollForm((c) => ({ ...c, code: e.target.value.trim() })) }),
+    h('div', { style: { display: 'flex', gap: 8, marginTop: 12, alignItems: 'center', flexWrap: 'wrap' } },
+      h('button', { style: S.primary, disabled: busy || !enrollForm.url || enrollActive, onClick: doEnroll }, t('enrollBtn')),
+      h('span', { style: S.muted }, t('enrollHint'))),
+    enrollStatusLine);
+
   const wanCfgForm = h('div', null,
     h('div', { style: { fontWeight: 600, fontSize: 13, marginBottom: 8 } }, t('cfgTitle')),
     h('div', { style: S.field }, t('cfgStep1')),
@@ -232,9 +277,20 @@ function RelaySettingsTab({ rpcCall, t }) {
         pinBlock('public', st.accessToken, st.publicPinCustom, t('pinDesc'))));
   }
 
+  const toggleManual = h('div', { style: { marginTop: 10 } },
+    h('button', { style: S.mini, onClick: () => setManualMode((m) => !m) },
+      manualMode ? t('enrollBack') : t('manualToken')));
+
+  const manualEntry = (manualMode || wanConfigured || cfgEdit)
+    ? h('div', { style: { marginTop: 12, paddingTop: 12, borderTop: '1px solid var(--dsw-alias-border-l2,#e5e7eb)' } },
+      !manualMode && wanConfigured && !cfgEdit ? wanHead : null,
+      cfgEdit ? wanEditForm : null,
+      manualMode && !wanConfigured && !cfgEdit ? wanCfgForm : null)
+    : null;
+
   const wanBlock = h('div', { style: S.card },
-    !wanOn && !wanConfigured ? wanCfgForm : wanHead,
-    cfgEdit ? wanEditForm : null,
+    !wanOn ? h('div', null, enrollFormBlock, toggleManual, manualEntry) : wanHead,
+    wanOn && cfgEdit ? wanEditForm : null,
     !wanOn ? wanStart : null,
     wanOn ? wanQr : null);
 

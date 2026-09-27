@@ -1,12 +1,12 @@
 // dsh-relay 服务编排：本地代理 + relay 隧道客户端 + 状态聚合
 
-import { networkInterfaces } from 'node:os';
+import { networkInterfaces, hostname as osHostname, platform as osPlatform, arch as osArch } from 'node:os';
 import { createRequire } from 'node:module';
 import { readFileSync, rmSync, mkdirSync, writeFileSync } from 'node:fs';
 import { join, dirname } from 'node:path';
 import { homedir } from 'node:os';
 import { createRelayProxy } from './proxy.mjs';
-import { RelayClient, publicUrlFromServer } from './relay.mjs';
+import { RelayClient, publicUrlFromServer, httpBaseFromServer } from './relay.mjs';
 
 const require = createRequire(import.meta.url);
 
@@ -66,6 +66,8 @@ export function createRelayService({
   getPins = () => ({ public: '', lan: '' }),
   isPinCustom = () => false,
   getRelayConfig = () => ({ url: '', token: '', enabled: false }),
+  saveRelayConfig = null, // async ({ url, token }) => void：准入批准/密钥轮换时持久化
+  pluginVersion = '',
   onRelayReady = () => {},
   /** dsh web 浏览器会话启动 token（实时取，issue 平台契约：GET / 首次需 ?token= 换 cookie） */
   launchToken = () => '',
@@ -118,7 +120,114 @@ export function createRelayService({
     return lanCache.ip;
   }
 
-  return {
+  // ---------- 准入申请（客户端主动申请接入） ----------
+  const ENROLL_POLL_MS = 3000;
+  const ENROLL_TIMEOUT_MS = 10 * 60_000;
+  let enroll = null; // {phase, serverUrl, requestId, detail, deadline, timer}
+
+  function collectIdentity() {
+    const macs = [];
+    const ips = [];
+    for (const addrs of Object.values(networkInterfaces())) {
+      for (const addr of addrs ?? []) {
+        if (addr.mac && addr.mac !== '00:00:00:00:00:00' && !macs.includes(addr.mac)) macs.push(addr.mac);
+        if (addr.family === 'IPv4' && !addr.internal && !ips.includes(addr.address)) ips.push(addr.address);
+      }
+    }
+    return {
+      hostname: osHostname(),
+      os: `${osPlatform()} ${osArch()}`,
+      macs: macs.slice(0, 8),
+      ips: ips.slice(0, 8),
+      version: pluginVersion,
+    };
+  }
+
+  function enrollSetState(phase, detail) {
+    if (enroll) { enroll.phase = phase; enroll.detail = detail ?? ''; }
+  }
+  function enrollClear() {
+    if (enroll?.timer) clearTimeout(enroll.timer);
+    enroll = null;
+  }
+
+  /** 客户端主动申请接入：POST /__relay/enroll 后轮询直至批准/拒绝/过期。 */
+  async function enrollStart(serverUrl, code = '') {
+    const httpBase = httpBaseFromServer(serverUrl);
+    if (!httpBase) throw new Error('服务端地址无效 | invalid server address');
+    enrollClear();
+    enroll = { phase: 'submitting', serverUrl, requestId: null, detail: '正在提交申请…', deadline: 0, timer: null };
+    let res;
+    try {
+      res = await fetch(`${httpBase}/__relay/enroll`, {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ code, info: collectIdentity() }),
+        signal: AbortSignal.timeout(10_000),
+      });
+    } catch (err) {
+      enrollSetState('error', `无法连接服务端：${err?.cause?.message ?? err?.message ?? err}`);
+      return;
+    }
+    const body = await res.json().catch(() => ({}));
+    if (!res.ok || !body.ok) {
+      const msgs = { 'bad-code': '邀请码错误', 'rate-limited': '尝试过于频繁，请稍后再试', 'pending-full': '服务端待审批队列已满', 'bad-identity': '申请被拒绝' };
+      enrollSetState('error', msgs[body.error] ?? `申请失败（${res.status}）`);
+      return;
+    }
+    enroll.requestId = body.requestId;
+    enroll.deadline = Date.now() + ENROLL_TIMEOUT_MS;
+    enrollSetState('pending', '申请已提交，等待管理员在服务端管理台批准…（10 分钟内有效）');
+    enrollPoll();
+  }
+
+  function enrollPoll() {
+    if (!enroll || enroll.phase !== 'pending') return;
+    if (Date.now() > enroll.deadline) { enrollSetState('expired', '申请已过期，请重新提交'); return; }
+    const tick = async () => {
+      if (!enroll || enroll.phase !== 'pending') return;
+      let body;
+      try {
+        const httpBase = httpBaseFromServer(enroll.serverUrl);
+        const res = await fetch(`${httpBase}/__relay/enroll/poll`, {
+          method: 'POST',
+          headers: { 'content-type': 'application/json' },
+          body: JSON.stringify({ requestId: enroll.requestId }),
+          signal: AbortSignal.timeout(8000),
+        });
+        body = await res.json().catch(() => ({}));
+      } catch { body = null; } // 网络抖动：继续下一轮（受 deadline 兜底，有界轮询）
+      if (!enroll || enroll.phase !== 'pending') return;
+      const status = body?.status;
+      if (status === 'pending') {
+        enroll.timer = setTimeout(enrollPoll, ENROLL_POLL_MS);
+        enroll.timer.unref?.();
+        return;
+      }
+      if (status === 'approved' && body.token?.length >= 16) {
+        const serverUrl = enroll.serverUrl;
+        enrollClear();
+        enroll = { phase: 'approved', serverUrl, requestId: null, detail: '已批准，正在建立隧道…', deadline: 0, timer: null };
+        try {
+          if (!saveRelayConfig) throw new Error('无法保存配置');
+          await saveRelayConfig({ url: serverUrl, token: body.token });
+          await api.startRelay();
+          enrollSetState('done', '接入成功！隧道已建立');
+        } catch (err) {
+          enrollSetState('error', `接入成功但启动失败：${err?.message ?? err}`);
+        }
+        return;
+      }
+      if (status === 'denied') { enrollSetState('denied', '管理员拒绝了这次申请'); return; }
+      if (status === 'expired') { enrollSetState('expired', '申请已过期，请重新提交'); return; }
+      // 未知响应：继续轮询（deadline 兜底）
+      enroll.timer = setTimeout(enrollPoll, ENROLL_POLL_MS);
+      enroll.timer.unref?.();
+    };
+    tick();
+  }
+
+  const api = {
     dshPort,
 
     /** 启动本地代理（幂等）。端口被占自动 +1 重试。 */
@@ -161,6 +270,11 @@ export function createRelayService({
         serverUrl: cfg.url,
         token: cfg.token,
         proxyPort: p.inletPort ?? p.port,
+        identity: collectIdentity(),
+        onRotate: (token) => {
+          // 服务端轮换密钥：持久化新密钥（start() 读 getRelayConfig 时即用新值）
+          try { saveRelayConfig?.({ url: cfg.url, token }); } catch (err) { logWarn(`dsh-relay: persist rotated token failed: ${err?.message ?? err}`); }
+        },
         log: logInfo,
         onChange: (snap) => {
           relayState = snap;
@@ -178,6 +292,15 @@ export function createRelayService({
       client = null;
       relayState = { phase: 'idle', detail: '', attempts: 0, nextRetryAt: null, server: null };
       if (!keepMarker) clearAutoMarker();
+    },
+
+    /** 客户端主动申请接入 NAS（准入审批流）。 */
+    async enroll(serverUrl, code = '') {
+      return enrollStart(serverUrl, code);
+    },
+    enrollCancel() { enrollClear(); },
+    enrollState() {
+      return enroll ? { phase: enroll.phase, detail: enroll.detail, serverUrl: enroll.serverUrl } : { phase: 'idle', detail: '' };
     },
 
     /** 重启后自动恢复：上次开着中继就重新拉起。 */
@@ -218,11 +341,13 @@ export function createRelayService({
         relayQr: publicUrl ? await qrCached(publicUrl) : null,
         relayState,
         relayConfig: { url: cfg.url, tokenSet: Boolean(cfg.token) },
+        enroll: enroll ? { phase: enroll.phase, detail: enroll.detail, serverUrl: enroll.serverUrl } : { phase: 'idle', detail: '' },
       };
     },
 
     async dispose() {
       this.stopRelay({ keepMarker: true });
+      enrollClear();
       if (proxy) {
         const p = proxy;
         proxy = null;
@@ -230,4 +355,5 @@ export function createRelayService({
       }
     },
   };
+  return api;
 }

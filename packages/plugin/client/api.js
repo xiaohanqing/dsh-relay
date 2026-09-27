@@ -11,6 +11,8 @@ export const RELAY_ENDPOINTS = Object.freeze({
   lanSetOverride: 'lan.setOverride',
   pinSetCustom: 'pin.setCustom',
   relayReset: 'relay.reset',
+  relayEnroll: 'relay.enroll',
+  relayEnrollCancel: 'relay.enroll.cancel',
 });
 
 /** status 的浏览器可见字段兜底。 */
@@ -34,5 +36,6 @@ export function redactStatus(s) {
     lanToken: s?.lanToken ?? null,
     publicPinCustom: s?.publicPinCustom === true,
     lanPinCustom: s?.lanPinCustom === true,
+    enroll: s?.enroll ?? { phase: 'idle', detail: '' },
   };
 }

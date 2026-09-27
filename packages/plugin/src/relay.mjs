@@ -38,12 +38,20 @@ export function publicUrlFromServer(input) {
   } catch { return ''; }
 }
 
+/** ws(s):// base → http(s):// base（HTTP API 用：enroll 等）。 */
+export function httpBaseFromServer(input) {
+  const base = normalizeServerUrl(input);
+  return base ? base.replace(/^ws/, 'http') : '';
+}
+
 /** 指数退避：base*2^n，封顶 cap，±20% 抖动。 */
 function backoffMs(attempt, cap) {
   const raw = Math.min(1000 * 2 ** Math.max(0, attempt - 1), cap);
   const jitter = 0.8 + randomBytes(1)[0] / 255 * 0.4; // 0.8~1.2
   return Math.floor(raw * jitter);
 }
+
+function tokenEqualStr(a, b) { return a === b; }
 
 /**
  * relay 隧道客户端。
@@ -52,15 +60,19 @@ function backoffMs(attempt, cap) {
  * @param {string} opts.token       鉴权 token
  * @param {number} opts.proxyPort   本地代理端口（数据面注入目标 127.0.0.1:proxyPort）
  * @param {(patch:object)=>void} [opts.onChange] 状态变化回调（合并进快照）
+ * @param {object} [opts.identity]  身份档案（连接后上报服务端入档）
+ * @param {(token:string)=>void} [opts.onRotate] 服务端轮换密钥后的持久化回调
  * @param {object} [opts.hooks]     测试注入：{ WebSocket, connectTcp }
  */
 export class RelayClient {
-  constructor({ serverUrl, token, proxyPort, onChange = () => {}, log = () => {}, hooks = {} }) {
+  constructor({ serverUrl, token, proxyPort, onChange = () => {}, log = () => {}, identity = null, onRotate = null, hooks = {} }) {
     this.base = normalizeServerUrl(serverUrl);
     this.token = String(token ?? '');
     this.proxyPort = proxyPort;
     this.onChange = onChange;
     this.log = log;
+    this.identity = identity;
+    this.onRotate = onRotate;
     this.WS = hooks.WebSocket ?? WebSocket;
     this.connectTcp = hooks.connectTcp ?? ((port, cb) => {
       const s = net.connect(port, '127.0.0.1', () => cb(null, s));
@@ -81,7 +93,6 @@ export class RelayClient {
     this.ctlAttempt = 0;
     /** @type {Set<import('node:timers').Timeout>} 待触发的重连定时器（stop 时全部撤销） */
     this.retryTimers = new Set();
-    this.ctlTimer = null;
     this.ctlTimer = null;
     this.pingTimer = null;
     this.lastPong = 0;
@@ -173,14 +184,30 @@ export class RelayClient {
         try { ws.send(JSON.stringify({ type: 'ping', t: Date.now() })); } catch { /* 忽略 */ }
       }, PING_INTERVAL_MS);
       this.pingTimer.unref?.();
+      // 连接成功后上报身份档案（服务端管理台展示）
+      if (this.identity) {
+        try { ws.send(JSON.stringify({ type: 'info', info: this.identity })); } catch { /* 忽略 */ }
+      }
     });
     ws.on('message', (raw, isBinary) => {
       if (isBinary) return;
       let msg;
       try { msg = JSON.parse(String(raw)); } catch { return; }
       if (msg.type === 'pong') this.lastPong = Date.now();
-      else if (msg.type === 'hello') this.server = { name: msg.server, protocol: msg.protocol, pool: msg.pool };
+      else if (msg.type === 'hello') this.server = { name: msg.server, protocol: msg.protocol, pool: msg.pool, client: msg.client };
       else if (msg.type === 'stats') this.server = { ...this.server, phone: msg.phone, idle: msg.idle, uptime: msg.uptime };
+      else if (msg.type === 'rotate' && typeof msg.token === 'string' && msg.token.length >= 16 && !tokenEqualStr(msg.token, this.token)) {
+        // 服务端轮换密钥：持久化新密钥并用它重建全部连接（旧 token 有 10 分钟宽限兜底）
+        this.log('relay: server rotated token, switching credentials');
+        this.token = msg.token;
+        try { this.onRotate?.(msg.token); } catch { /* 持久化失败只影响下次重启后的首连 */ }
+        // setImmediate 脱离当前 message 处理栈，避免在 ws 事件里同步重建
+        setImmediate(() => {
+          if (this.stopped) return;
+          this.stop();
+          this.start();
+        });
+      }
       if (msg.type === 'hello' || msg.type === 'stats') this._emit({ server: this.server });
     });
     const drop = (err) => this._ctlFail(err ?? new Error('control connection lost'));
@@ -215,10 +242,14 @@ export class RelayClient {
   // ---------- 数据连接池 ----------
   _scheduleDataConnect(delay) {
     if (this.stopped) return;
+    // 确定性轮转散布：多条连接同时到达退避封顶时会在同一秒聚簇（worst-case 实测 4~5 次/秒），
+    // 轮转 +0/0.7/1.4/2.1/2.8s 把重连均匀错开 5 个桶
+    this._spreadSeq = ((this._spreadSeq ?? 0) + 1) % 5;
+    const spread = this._spreadSeq * 700;
     const t = setTimeout(() => {
       this.retryTimers.delete(t);
       this._connectData();
-    }, delay);
+    }, delay + spread);
     t.unref?.();
     this.retryTimers.add(t);
   }

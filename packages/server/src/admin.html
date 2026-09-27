@@ -6,53 +6,73 @@
 <title>dsh-relay 管理台</title>
 <style>
 :root{
-  --bg:#0f1420;--card:#181f2f;--card2:#1e2739;--line:#2a3450;
+  --bg:#0d1220;--card:#161d2e;--card2:#1d2537;--line:#293349;
   --fg:#e8ecf5;--dim:#8b96ad;--acc:#4f8cff;--ok:#34c07c;--bad:#e5604f;--warn:#e0a13c;
   font-size:15px;
 }
 *{box-sizing:border-box}
-body{margin:0;background:var(--bg);color:var(--fg);font-family:system-ui,-apple-system,"PingFang SC","Microsoft YaHei",sans-serif;min-height:100vh;display:flex;justify-content:center;padding:32px 16px}
-.wrap{width:100%;max-width:860px}
-h1{font-size:1.25rem;margin:0 0 4px;display:flex;align-items:center;gap:10px}
+body{margin:0;background:var(--bg);color:var(--fg);font-family:system-ui,-apple-system,"PingFang SC","Microsoft YaHei",sans-serif}
+.wrap{max-width:960px;margin:0 auto;padding:28px 16px 60px}
+h1{font-size:1.25rem;margin:0;display:flex;align-items:center;gap:10px}
 h1 .dot{width:9px;height:9px;border-radius:50%;background:var(--ok);box-shadow:0 0 8px var(--ok)}
 h1 .dot.bad{background:var(--bad);box-shadow:0 0 8px var(--bad)}
-.sub{color:var(--dim);font-size:.85rem;margin-bottom:24px}
-.card{background:var(--card);border:1px solid var(--line);border-radius:12px;padding:18px 20px;margin-bottom:18px}
-.card h2{font-size:.95rem;margin:0 0 12px;color:var(--dim);font-weight:600}
+h2{font-size:.95rem;margin:0 0 12px;color:var(--dim);font-weight:600;display:flex;align-items:center;gap:8px}
+.sub{color:var(--dim);font-size:.85rem;margin:4px 0 0}
+.card{background:var(--card);border:1px solid var(--line);border-radius:14px;padding:18px 20px;margin-top:18px}
 .row{display:flex;gap:10px;flex-wrap:wrap;align-items:center}
 input{background:var(--card2);border:1px solid var(--line);border-radius:8px;color:var(--fg);padding:9px 12px;font-size:.95rem;outline:none;min-width:0}
 input:focus{border-color:var(--acc)}
-button{background:var(--acc);border:0;border-radius:8px;color:#fff;padding:9px 16px;font-size:.95rem;cursor:pointer}
-button:hover{filter:brightness(1.1)}
+button{background:var(--acc);border:0;border-radius:8px;color:#fff;padding:9px 16px;font-size:.92rem;cursor:pointer}
+button:hover{filter:brightness(1.12)}
 button.ghost{background:transparent;border:1px solid var(--line);color:var(--dim)}
 button.danger{background:transparent;border:1px solid var(--bad);color:var(--bad)}
+button.small{padding:5px 12px;font-size:.82rem}
 button:disabled{opacity:.45;cursor:default}
-table{width:100%;border-collapse:collapse;font-size:.92rem}
-th{color:var(--dim);text-align:left;font-weight:500;padding:8px 6px;border-bottom:1px solid var(--line);font-size:.82rem}
-td{padding:10px 6px;border-bottom:1px solid var(--line)}
-tr:last-child td{border-bottom:0}
-.pill{display:inline-flex;align-items:center;gap:6px;padding:2px 10px;border-radius:999px;font-size:.8rem}
+.pill{display:inline-flex;align-items:center;gap:6px;padding:2px 10px;border-radius:999px;font-size:.8rem;white-space:nowrap}
 .pill.on{background:rgba(52,192,124,.12);color:var(--ok)}
 .pill.off{background:rgba(229,96,79,.12);color:var(--bad)}
+.pill.warn{background:rgba(224,161,60,.14);color:var(--warn)}
 .pill i{width:7px;height:7px;border-radius:50%;background:currentColor}
-.mono{font-family:ui-monospace,Menlo,Consolas,monospace;font-size:.85rem;color:var(--dim)}
-.stat{display:flex;gap:14px;flex-wrap:wrap;color:var(--dim);font-size:.85rem}
-.stat b{color:var(--fg);font-weight:600}
+.mono{font-family:ui-monospace,Menlo,Consolas,monospace;font-size:.82rem;color:var(--dim);word-break:break-all}
+.hint{color:var(--dim);font-size:.82rem;line-height:1.6}
 .err{color:var(--bad);font-size:.85rem;margin-top:8px;min-height:1em}
-dialog{background:var(--card);color:var(--fg);border:1px solid var(--line);border-radius:12px;padding:22px;max-width:480px;width:92%}
+.badge{background:var(--bad);color:#fff;border-radius:999px;font-size:.72rem;padding:1px 8px}
+.grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(200px,1fr));gap:10px;margin-top:12px}
+.stat{background:var(--card2);border-radius:10px;padding:12px 14px}
+.stat .v{font-size:1.3rem;font-weight:700}
+.stat .k{color:var(--dim);font-size:.78rem;margin-top:2px}
+/* 客户端卡片 */
+.client{background:var(--card2);border:1px solid var(--line);border-radius:12px;padding:14px 16px;margin-top:12px}
+.client .head{display:flex;align-items:center;gap:10px;flex-wrap:wrap}
+.client .head b{font-size:1rem}
+.client .head .spacer{flex:1}
+.idgrid{display:grid;grid-template-columns:repeat(auto-fit,minmax(220px,1fr));gap:2px 18px;margin-top:10px}
+.kv{display:flex;gap:8px;font-size:.85rem;padding:2px 0}
+.kv span:first-child{color:var(--dim);flex:0 0 76px}
+.kv span:last-child{word-break:break-all}
+.actions{display:flex;gap:8px;flex-wrap:wrap;margin-top:12px}
+/* 待审批 */
+.pending{border:1px solid var(--warn);border-radius:12px;padding:14px 16px;margin-top:12px;background:rgba(224,161,60,.06)}
+/* 事件 */
+.event{display:flex;gap:10px;padding:6px 0;border-bottom:1px solid var(--line);font-size:.85rem}
+.event:last-child{border-bottom:0}
+.event .t{color:var(--dim);flex:0 0 96px;font-family:ui-monospace,monospace;font-size:.78rem;padding-top:2px}
+/* 弹层 */
+dialog{background:var(--card);color:var(--fg);border:1px solid var(--line);border-radius:14px;padding:22px;max-width:500px;width:92%}
 dialog::backdrop{background:rgba(0,0,0,.55)}
 .token-box{background:var(--card2);border:1px dashed var(--acc);border-radius:8px;padding:12px;font-family:ui-monospace,Menlo,monospace;font-size:.85rem;word-break:break-all;margin:12px 0}
-.hint{color:var(--dim);font-size:.82rem;line-height:1.6}
-.kv{display:flex;gap:8px;margin:4px 0}
-.kv span:first-child{color:var(--dim);flex:0 0 84px}
-.login-wrap{display:flex;justify-content:center;padding-top:12vh}
+/* toast */
+#toast{position:fixed;left:50%;bottom:26px;transform:translateX(-50%);background:var(--card2);border:1px solid var(--line);border-radius:10px;padding:10px 18px;font-size:.9rem;opacity:0;transition:opacity .25s;pointer-events:none;z-index:9}
+#toast.show{opacity:1}
+#toast.ok{border-color:var(--ok)}#toast.bad{border-color:var(--bad)}
+/* 登录 */
+.login-wrap{display:flex;justify-content:center;padding-top:14vh}
 .login-card{width:360px}
-@media (max-width:600px){td:nth-child(4),th:nth-child(4){display:none}}
+@media (max-width:600px){.wrap{padding-top:16px}h1{font-size:1.05rem}}
 </style>
 </head>
 <body>
 <div class="wrap" id="app">
-  <!-- 登录视图 -->
   <div class="login-wrap" id="loginView" hidden>
     <div class="card login-card">
       <h1><span class="dot"></span>dsh-relay 管理台</h1>
@@ -63,111 +83,285 @@ dialog::backdrop{background:rgba(0,0,0,.55)}
     </div>
   </div>
 
-  <!-- 主视图 -->
   <div id="mainView" hidden>
     <h1><span class="dot" id="hdrDot"></span>dsh-relay 管理台
-      <button class="ghost" id="logoutBtn" style="margin-left:auto;padding:5px 12px;font-size:.82rem">退出</button>
+      <button class="ghost small" id="logoutBtn" style="margin-left:auto">退出</button>
     </h1>
     <p class="sub" id="serverInfo"></p>
+    <div class="card" id="tlsWarn" hidden>
+      <span class="pill warn"><i></i>当前无 TLS（明文传输）——上公网前必须配置证书，见 docs/deploy-nas.md</span>
+    </div>
+
+    <div class="grid" id="statGrid"></div>
+
+    <div class="card" id="pendingCard" hidden>
+      <h2>待审批的接入申请 <span class="badge" id="pendingBadge"></span></h2>
+      <div id="pendingList"></div>
+    </div>
 
     <div class="card">
       <h2>客户端</h2>
-      <table>
-        <thead><tr><th>名称</th><th>域名</th><th>隧道</th><th>手机 / 空闲池</th><th>Token</th><th></th></tr></thead>
-        <tbody id="clientRows"></tbody>
-      </table>
+      <div id="clientList"></div>
       <div class="err" id="listErr"></div>
     </div>
 
     <div class="card">
-      <h2>添加客户端</h2>
+      <h2>添加客户端（手动创建）</h2>
       <div class="row">
-        <input id="newId" placeholder="名称（如 home / office）" style="flex:1;min-width:160px">
-        <input id="newDomain" placeholder="域名（可选，如 dsh.example.com）" style="flex:2;min-width:200px">
+        <input id="newId" placeholder="名称（如 home / office）" style="flex:1;min-width:150px">
+        <input id="newDomain" placeholder="域名（可选，如 dsh.example.com）" style="flex:2;min-width:190px">
         <button id="addBtn">生成并添加</button>
       </div>
-      <p class="hint" style="margin-bottom:0">域名用于手机侧路由：访问该域名的流量进这台电脑。留空则为默认客户端（裸 IP 访问落到它）。Token 只在生成时显示一次。</p>
+      <p class="hint" style="margin-bottom:0">域名用于手机侧路由：访问该域名的流量进这台电脑；留空则为默认客户端（裸 IP 访问落到它）。Token 只在生成时显示一次。</p>
       <div class="err" id="addError"></div>
+    </div>
+
+    <div class="card">
+      <h2>设置</h2>
+      <div class="kv"><span>自动轮换</span>
+        <span class="row" style="gap:8px">
+          <input id="setRotateDays" type="number" min="0" max="3650" style="width:90px">
+          <span class="hint">天（0 = 关闭）</span>
+          <button class="ghost small" id="saveRotate">保存</button>
+        </span>
+      </div>
+      <div class="kv"><span>邀请码</span>
+        <span class="row" style="gap:8px">
+          <input id="setEnrollCode" placeholder="（空 = 关闭，开放申请）" style="width:200px">
+          <button class="ghost small" id="saveCode">保存</button>
+        </span>
+      </div>
+      <div class="kv"><span>连接池</span>
+        <span class="row" style="gap:8px">
+          <input id="setPoolHint" type="number" min="1" max="64" style="width:90px">
+          <span class="hint">条（每客户端保持的空闲隧道连接数）</span>
+        </span>
+      </div>
+      <div class="kv"><span>绑定时限</span>
+        <span class="row" style="gap:8px">
+          <input id="setBindWait" type="number" min="500" max="60000" style="width:90px">
+          <span class="hint">ms（手机流量等待隧道分配的最长时间）</span>
+        </span>
+      </div>
+      <div class="row" style="margin-top:10px"><button class="ghost small" id="savePool">保存连接池/绑定时限</button></div>
+      <div class="err" id="setErr"></div>
+      <hr style="border:0;border-top:1px solid var(--line);margin:16px 0">
+      <h2>修改管理密码</h2>
+      <div class="row">
+        <input type="password" id="pwCur" placeholder="当前密码" style="flex:1;min-width:140px">
+        <input type="password" id="pwNext" placeholder="新密码（至少 8 位）" style="flex:1;min-width:140px">
+        <button id="pwBtn">修改</button>
+      </div>
+      <div class="err" id="pwErr"></div>
+    </div>
+
+    <div class="card">
+      <h2>事件日志 <button class="ghost small" id="refreshEvents" style="margin-left:auto">刷新</button></h2>
+      <div id="eventList"></div>
     </div>
   </div>
 </div>
 
 <dialog id="tokenDlg">
   <h2 style="margin:0 0 8px;font-size:1rem">✅ 客户端已创建</h2>
-  <p class="hint">把下面的 Token 填到对应电脑的 DSH 插件设置页。<b>关闭后无法再次查看</b>（只能删除重建）。</p>
+  <p class="hint">把下面的密钥串填到对应电脑的 DSH 插件设置页（或等它主动申请时自动发放）。<b>关闭后无法再次查看</b>，只能轮换或删除重建。</p>
   <div class="token-box" id="tokenText"></div>
   <div class="row">
-    <button id="copyToken">复制 Token</button>
+    <button id="copyToken">复制密钥串</button>
     <button class="ghost" id="closeToken">我已保存，关闭</button>
   </div>
 </dialog>
 
 <dialog id="confirmDlg">
-  <h2 style="margin:0 0 8px;font-size:1rem">删除客户端</h2>
+  <h2 style="margin:0 0 8px;font-size:1rem" id="confirmTitle"></h2>
   <p class="hint" id="confirmText"></p>
   <div class="row" style="margin-top:14px">
-    <button class="danger" id="confirmYes">确认删除</button>
+    <button class="danger" id="confirmYes">确认</button>
     <button class="ghost" id="confirmNo">取消</button>
   </div>
 </dialog>
 
+<dialog id="domainDlg">
+  <h2 style="margin:0 0 8px;font-size:1rem">修改域名</h2>
+  <p class="hint">手机访问该域名的流量会进这台电脑。留空 = 默认客户端（裸 IP 访问落到它）。</p>
+  <input id="domainInput" style="width:100%;margin:10px 0" placeholder="dsh.example.com">
+  <div class="row"><button id="domainSave">保存</button><button class="ghost" id="domainCancel">取消</button></div>
+</dialog>
+
+<div id="toast"></div>
+
 <script>
 (function(){
   const $ = (id) => document.getElementById(id);
-  let pendingRemove = null;
+  let view = null;          // 当前各客户端数据缓存
+  let confirmFn = null;
+  let domainTarget = null;
+  let toastTimer = null;
 
-  async function api(path, opts = {}) {
+  function toast(msg, ok = true){
+    const t = $('toast');
+    t.textContent = msg;
+    t.className = 'show ' + (ok ? 'ok' : 'bad');
+    clearTimeout(toastTimer);
+    toastTimer = setTimeout(() => { t.className = ''; }, 2600);
+  }
+  function esc(s){ const d = document.createElement('i'); d.textContent = s == null ? '' : String(s); return d.innerHTML; }
+  function fmtTime(ts){ if (!ts) return '—'; const d = new Date(ts); return d.toLocaleTimeString('zh-CN', {hour12:false}); }
+  function fmtDate(ts){ if (!ts) return '—'; return new Date(ts).toLocaleString('zh-CN', {hour12:false}); }
+  function since(ts){ if (!ts) return '—'; const s = Math.floor((Date.now() - ts)/1000);
+    if (s < 3600) return s + ' 秒'; if (s < 86400) return Math.floor(s/3600) + ' 小时'; return Math.floor(s/86400) + ' 天'; }
+  function daysOld(ts, days){ if (!ts || !days) return null; const age = Math.floor((Date.now()-ts)/86400000); return age; }
+
+  async function api(path, opts = {}){
     const res = await fetch(path, { headers: { 'content-type': 'application/json' }, ...opts });
     let data = {};
     try { data = await res.json(); } catch { /* 空 */ }
     return { status: res.status, data };
   }
+  function show(v){ $('loginView').hidden = v !== 'login'; $('mainView').hidden = v !== 'main'; }
 
-  function esc(s){ const d=document.createElement('i'); d.textContent=s==null?'':String(s); return d.innerHTML; }
-
-  function show(view){
-    $('loginView').hidden = view !== 'login';
-    $('mainView').hidden = view !== 'main';
-  }
-
+  // ---------- 主渲染 ----------
   async function refresh(){
     const { status, data } = await api('/__relay/admin/api/overview');
     if (status === 401) { show('login'); return; }
-    if (!data.ok) { $('listErr').textContent = '加载失败'; return; }
+    if (!data.ok) { toast('加载失败', false); return; }
     show('main');
+    view = data;
+
     $('hdrDot').className = 'dot' + (data.insecure ? ' bad' : '');
-    $('serverInfo').textContent =
-      data.server + ' · 运行 ' + Math.floor(data.uptime/60) + ' 分钟 · ' +
-      (data.insecure ? '⚠ 无 TLS（调试模式）' : 'TLS 已启用');
-    const tb = $('clientRows');
-    tb.innerHTML = data.clients.map((c) =>
-      '<tr>'
-      + '<td><b>' + esc(c.id) + '</b></td>'
-      + '<td>' + (c.domain ? '<span class="mono">' + esc(c.domain) + '</span>' : '<span class="hint">（默认·裸IP）</span>') + '</td>'
-      + '<td><span class="pill ' + (c.connected ? 'on' : 'off') + '"><i></i>' + (c.connected ? '已连接' : '离线') + '</span></td>'
-      + '<td class="mono">' + c.phone + ' / ' + c.idle + '</td>'
-      + '<td class="mono">' + esc(c.tokenHint) + '</td>'
-      + '<td style="text-align:right"><button class="danger" data-del="' + esc(c.id) + '" style="padding:4px 10px;font-size:.8rem">删除</button></td>'
-      + '</tr>').join('');
-    for (const b of tb.querySelectorAll('[data-del]')) {
-      b.onclick = () => askRemove(b.getAttribute('data-del'));
-    }
+    $('serverInfo').textContent = data.server + ' · 运行 ' + since(Date.now() - data.uptime*1000);
+    $('tlsWarn').hidden = !data.insecure;
+
+    const online = data.clients.filter(c => c.connected).length;
+    const phone = data.clients.reduce((a,c)=>a+c.phone,0);
+    $('statGrid').innerHTML =
+      stat(online + ' / ' + data.clients.length, '客户端在线 / 总数')
+      + stat(phone, '手机连接数')
+      + stat(data.pendingCount, '待审批申请')
+      + stat(Math.floor(data.uptime/3600) + ' h', '服务端运行时长');
+
+    renderPending();
+    renderClients(data);
     $('addBtn').disabled = !data.mutable;
+    $('setRotateDays').value = data.settings.rotateDays;
+    $('setEnrollCode').placeholder = data.settings.enrollCodeSet ? '已设置（输入新值覆盖，留空保存=清除）' : '（空 = 关闭，开放申请）';
+  }
+  function stat(v, k){ return '<div class="stat"><div class="v">' + esc(v) + '</div><div class="k">' + esc(k) + '</div></div>'; }
+
+  function renderPending(){
+    const card = $('pendingCard');
+    if (!view.pendingCount) { card.hidden = true; return; }
+    card.hidden = false;
+    $('pendingBadge').textContent = view.pendingCount;
+    $('pendingList').innerHTML = '<div class="hint">正在获取待审批详情…</div>';
+    api('/__relay/admin/api/enroll/list').then(({data}) => {
+      if (!data.ok) return;
+      $('pendingList').innerHTML = data.pending.map((p) =>
+        '<div class="pending">'
+        + '<div class="row"><b>' + esc(p.info.hostname || '未知设备') + '</b>'
+        + '<span class="pill warn"><i></i>等待批准</span><span class="spacer"></span>'
+        + '<span class="hint">' + fmtTime(p.createdAt) + ' · 来自 ' + esc(p.sourceIp) + '</span></div>'
+        + '<div class="idgrid">'
+        + kv('系统', p.info.os)
+        + kv('插件版本', p.info.version)
+        + kv('MAC', (p.info.macs||[]).join(', '))
+        + kv('局域网 IP', (p.info.ips||[]).join(', '))
+        + '</div>'
+        + '<div class="row" style="margin-top:10px">'
+        + '客户端名 <input data-enroll="' + esc(p.id) + '" class="enroll-id" value="' + esc(slug(p.info.hostname)) + '" style="width:150px">'
+        + '域名 <input data-enroll="' + esc(p.id) + '" class="enroll-domain" placeholder="可选" style="width:180px">'
+        + '<button class="small" data-approve="' + esc(p.id) + '">批准接入</button>'
+        + '<button class="danger small" data-deny="' + esc(p.id) + '">拒绝</button>'
+        + '</div></div>').join('');
+      for (const b of $('pendingList').querySelectorAll('[data-approve]')) b.onclick = () => approve(b.getAttribute('data-approve'));
+      for (const b of $('pendingList').querySelectorAll('[data-deny]')) b.onclick = () => deny(b.getAttribute('data-deny'));
+    });
+  }
+  function kv(k, v){ return '<div class="kv"><span>' + esc(k) + '</span><span>' + esc(v || '—') + '</span></div>'; }
+  function slug(s){ return String(s||'').toLowerCase().replace(/[^a-z0-9-]+/g,'-').replace(/^-+|-+$/g,'').slice(0,32); }
+
+  async function approve(requestId){
+    const card = document.querySelector('[data-enroll="' + requestId + '"].enroll-id');
+    const dom = document.querySelector('[data-enroll="' + requestId + '"].enroll-domain');
+    const { status, data } = await api('/__relay/admin/api/enroll/approve', {
+      method: 'POST',
+      body: JSON.stringify({ requestId, clientId: card ? card.value.trim() : '', domain: dom ? dom.value.trim() : '' }),
+    });
+    if (status === 200 && data.ok) { toast('已批准「' + data.clientId + '」，密钥将自动下发给客户端'); refresh(); }
+    else toast(data.message || '批准失败', false);
+  }
+  async function deny(requestId){
+    const { data } = await api('/__relay/admin/api/enroll/deny', { method: 'POST', body: JSON.stringify({ requestId }) });
+    if (data.ok) { toast('已拒绝'); refresh(); } else toast('操作失败', false);
   }
 
+  function renderClients(data){
+    const el = $('clientList');
+    el.innerHTML = data.clients.map((c) => {
+      const age = daysOld(c.issuedAt, 1);
+      const rotateInfo = c.rotateDays > 0 ? ('每 ' + c.rotateDays + ' 天自动轮换' + (age != null ? '，已用 ' + age + ' 天' : '')) : '手动轮换';
+      return '<div class="client">'
+        + '<div class="head"><b>' + esc(c.id) + '</b>'
+        + '<span class="pill ' + (c.connected ? 'on' : 'off') + '"><i></i>' + (c.connected ? '在线' : '离线') + '</span>'
+        + (c.domain ? '<span class="mono">' + esc(c.domain) + '</span>' : '<span class="hint">默认 · 裸IP</span>')
+        + '<span class="spacer"></span><span class="mono">密钥 ' + esc(c.tokenHint) + '</span></div>'
+        + '<div class="idgrid">'
+        + kv('身份', c.identity ? esc(c.identity.hostname + ' · ' + (c.identity.os || '?')) : '—')
+        + kv('MAC', c.identity && c.identity.macs.length ? esc(c.identity.macs.join(', ')) : '—')
+        + kv('局域网 IP', c.identity && c.identity.ips.length ? esc(c.identity.ips.join(', ')) : '—')
+        + kv('来源 IP', c.connected ? esc(c.clientIp || '—') : '—')
+        + kv('手机 / 空闲池', c.phone + ' / ' + c.idle)
+        + kv('密钥龄期', esc(rotateInfo))
+        + '</div>'
+        + '<div class="actions">'
+        + '<button class="ghost small" data-act="rotate" data-id="' + esc(c.id) + '">轮换密钥</button>'
+        + '<button class="ghost small" data-act="domain" data-id="' + esc(c.id) + '" data-domain="' + esc(c.domain) + '">改域名</button>'
+        + '<button class="danger small" data-act="remove" data-id="' + esc(c.id) + '">删除</button>'
+        + '</div></div>';
+    }).join('') || '<div class="hint">还没有客户端。让电脑上的插件「申请接入」，或在下方手动创建。</div>';
+    for (const b of el.querySelectorAll('[data-act]')) {
+      const id = b.getAttribute('data-id');
+      const act = b.getAttribute('data-act');
+      if (act === 'rotate') b.onclick = () => askConfirm('轮换密钥', '确定轮换「' + id + '」的密钥串？旧密钥宽限 10 分钟，在线客户端会自动收到新密钥。', () => doRotate(id));
+      if (act === 'remove') b.onclick = () => askConfirm('删除客户端', '确定删除「' + id + '」？它的隧道会立刻断开，密钥作废。', () => doRemove(id));
+      if (act === 'domain') b.onclick = () => { domainTarget = id; $('domainInput').value = b.getAttribute('data-domain') || ''; $('domainDlg').showModal(); };
+    }
+  }
+
+  async function doRotate(id){
+    const { data } = await api('/__relay/admin/api/clients/rotate', { method: 'POST', body: JSON.stringify({ id }) });
+    if (data.ok) { toast('「' + id + '」的密钥已轮换，客户端将无感切换'); refresh(); }
+    else toast(data.message || '轮换失败', false);
+  }
+  async function doRemove(id){
+    const { data } = await api('/__relay/admin/api/clients/remove', { method: 'POST', body: JSON.stringify({ id }) });
+    if (data.ok) { toast('已删除「' + id + '」'); refresh(); } else toast(data.message || '删除失败', false);
+  }
+  function askConfirm(title, text, fn){
+    $('confirmTitle').textContent = title;
+    $('confirmText').textContent = text;
+    confirmFn = fn;
+    $('confirmDlg').showModal();
+  }
+
+  async function loadEvents(){
+    const { data } = await api('/__relay/admin/api/events');
+    if (!data.ok) return;
+    $('eventList').innerHTML = data.events.map((e) =>
+      '<div class="event"><span class="t">' + fmtTime(e.ts) + '</span><span>' + esc(e.text) + '</span></div>'
+    ).join('') || '<div class="hint">暂无事件</div>';
+  }
+
+  // ---------- 操作 ----------
   async function login(){
     $('loginErr').textContent = '';
     $('loginBtn').disabled = true;
     try {
-      const { status, data } = await api('/__relay/admin/api/login', {
-        method: 'POST', body: JSON.stringify({ password: $('pwd').value }),
-      });
-      if (status === 200) { $('pwd').value = ''; refresh(); }
-      else if (data.error === 'locked') $('loginErr').textContent = '尝试过多，请 ' + data.retryAfter + ' 秒后再试';
-      else $('loginErr').textContent = '密码错误';
+      const { status } = await api('/__relay/admin/api/login', { method: 'POST', body: JSON.stringify({ password: $('pwd').value }) });
+      if (status === 200) { $('pwd').value = ''; refresh(); loadEvents(); }
+      else $('loginErr').textContent = '密码错误（连续错误会锁定 5 分钟）';
     } finally { $('loginBtn').disabled = false; }
   }
-
   async function addClient(){
     $('addError').textContent = '';
     $('addBtn').disabled = true;
@@ -181,24 +375,24 @@ dialog::backdrop{background:rgba(0,0,0,.55)}
         $('tokenDlg').showModal();
         $('newId').value = ''; $('newDomain').value = '';
         refresh();
-      } else {
-        $('addError').textContent = data.message || data.error || '添加失败';
-      }
+      } else $('addError').textContent = data.message || data.error || '添加失败';
     } finally { $('addBtn').disabled = false; }
   }
-
-  function askRemove(id){
-    pendingRemove = id;
-    $('confirmText').textContent = '确定删除客户端「' + id + '」？它的隧道会立刻断开，且 Token 作废。';
-    $('confirmDlg').showModal();
+  async function saveSettings(patch){
+    $('setErr').textContent = '';
+    const { status, data } = await api('/__relay/admin/api/settings', { method: 'POST', body: JSON.stringify(patch) });
+    if (status === 200 && data.ok) { toast('设置已保存'); refresh(); }
+    else $('setErr').textContent = data.message || data.error || '保存失败';
   }
-
-  async function doRemove(){
-    if (!pendingRemove) return;
-    await api('/__relay/admin/api/clients/remove', { method: 'POST', body: JSON.stringify({ id: pendingRemove }) });
-    pendingRemove = null;
-    $('confirmDlg').close();
-    refresh();
+  async function changePassword(){
+    $('pwErr').textContent = '';
+    const { status, data } = await api('/__relay/admin/api/password', {
+      method: 'POST', body: JSON.stringify({ current: $('pwCur').value, next: $('pwNext').value }),
+    });
+    if (status === 200 && data.ok) {
+      $('pwCur').value = ''; $('pwNext').value = '';
+      toast(data.persisted ? '密码已修改并保存' : '密码已修改（重启后恢复为文件中的旧密码）', data.persisted);
+    } else $('pwErr').textContent = data.message || (status === 401 ? '当前密码错误' : '修改失败');
   }
 
   $('loginBtn').onclick = login;
@@ -206,13 +400,28 @@ dialog::backdrop{background:rgba(0,0,0,.55)}
   $('addBtn').onclick = addClient;
   $('logoutBtn').onclick = async () => { await api('/__relay/admin/api/logout', { method: 'POST' }); show('login'); };
   $('copyToken').onclick = async () => {
-    try { await navigator.clipboard.writeText($('tokenText').textContent); $('copyToken').textContent = '已复制'; setTimeout(() => { $('copyToken').textContent = '复制 Token'; }, 1500); } catch { /* 剪贴板不可用 */ }
+    try { await navigator.clipboard.writeText($('tokenText').textContent); toast('已复制'); } catch { toast('复制失败，请手动选择', false); }
   };
   $('closeToken').onclick = () => $('tokenDlg').close();
-  $('confirmYes').onclick = doRemove;
-  $('confirmNo').onclick = () => { pendingRemove = null; $('confirmDlg').close(); };
+  $('confirmYes').onclick = () => { $('confirmDlg').close(); if (confirmFn) { const f = confirmFn; confirmFn = null; f(); } };
+  $('confirmNo').onclick = () => { confirmFn = null; $('confirmDlg').close(); };
+  $('saveRotate').onclick = () => saveSettings({ rotateDays: Number($('setRotateDays').value) });
+  $('saveCode').onclick = () => saveSettings({ enrollCode: $('setEnrollCode').value.trim() });
+  $('savePool').onclick = () => saveSettings({ poolHint: Number($('setPoolHint').value), bindWaitMs: Number($('setBindWait').value) });
+  $('pwBtn').onclick = changePassword;
+  $('refreshEvents').onclick = loadEvents;
+  $('domainSave').onclick = async () => {
+    const { status, data } = await api('/__relay/admin/api/clients/domain', {
+      method: 'POST', body: JSON.stringify({ id: domainTarget, domain: $('domainInput').value.trim() }),
+    });
+    $('domainDlg').close();
+    if (status === 200 && data.ok) { toast('域名已更新'); refresh(); }
+    else toast(data.message || '更新失败', false);
+  };
+  $('domainCancel').onclick = () => $('domainDlg').close();
 
   refresh();
+  loadEvents();
   setInterval(refresh, 5000);
 })();
 </script>

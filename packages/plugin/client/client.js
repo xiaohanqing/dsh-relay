@@ -43,7 +43,9 @@ var RELAY_ENDPOINTS = Object.freeze({
   lanAuthSetEnabled: "lanAuth.setEnabled",
   lanSetOverride: "lan.setOverride",
   pinSetCustom: "pin.setCustom",
-  relayReset: "relay.reset"
+  relayReset: "relay.reset",
+  relayEnroll: "relay.enroll",
+  relayEnrollCancel: "relay.enroll.cancel"
 });
 function redactStatus(s) {
   return {
@@ -64,7 +66,8 @@ function redactStatus(s) {
     accessToken: s?.accessToken ?? null,
     lanToken: s?.lanToken ?? null,
     publicPinCustom: s?.publicPinCustom === true,
-    lanPinCustom: s?.lanPinCustom === true
+    lanPinCustom: s?.lanPinCustom === true,
+    enroll: s?.enroll ?? { phase: "idle", detail: "" }
   };
 }
 
@@ -107,6 +110,14 @@ var zh = {
   retryInfo: "\u7B2C {n} \u6B21\u91CD\u8BD5 \xB7 \u7EA6 {s} \u79D2\u540E\u81EA\u52A8\u91CD\u8BD5",
   adv: "\u9AD8\u7EA7",
   advAddress: "\u5C40\u57DF\u7F51\u5730\u5740",
+  enrollTitle: "\u4E00\u952E\u63A5\u5165\uFF08\u63A8\u8350\uFF09",
+  enrollCodeLabel: "\u9080\u8BF7\u7801\uFF08\u670D\u52A1\u7AEF\u5F00\u542F\u65F6\u5FC5\u586B\uFF09",
+  enrollCodePh: "\u6CA1\u6709\u53EF\u7559\u7A7A",
+  enrollBtn: "\u7533\u8BF7\u63A5\u5165",
+  enrollHint: "\u7BA1\u7406\u5458\u5728 NAS \u7BA1\u7406\u53F0\u6279\u51C6\u540E\u81EA\u52A8\u5B8C\u6210\u914D\u7F6E\uFF0C\u65E0\u9700\u590D\u5236 Token",
+  enrollBack: "\u2190 \u8FD4\u56DE\u4E00\u952E\u63A5\u5165",
+  manualToken: "\u624B\u52A8\u586B\u5199 Token\uFF08\u9AD8\u7EA7\uFF09",
+  cancelEnroll: "\u53D6\u6D88\u7533\u8BF7",
   auto: "\u81EA\u52A8\u9009\u62E9",
   reset: "\u6062\u590D\u51FA\u5382",
   resetDesc: "\u6E05\u7A7A\u672C\u63D2\u4EF6\u5168\u90E8\u8BBE\u7F6E\u5E76\u91CD\u7F6E\u5BC6\u7801\uFF08\u4E0D\u5F71\u54CD DSH \u5176\u5B83\u6570\u636E\uFF09",
@@ -153,6 +164,14 @@ var en = {
   retryInfo: "retry #{n} in ~{s}s",
   adv: "Advanced",
   advAddress: "LAN address",
+  enrollTitle: "One-click join (recommended)",
+  enrollCodeLabel: "Invite code (if required by the server)",
+  enrollCodePh: "leave empty if none",
+  enrollBtn: "Request access",
+  enrollHint: "Approve it in the NAS admin console \u2014 no token copy-paste needed",
+  enrollBack: "\u2190 Back to one-click join",
+  manualToken: "Enter token manually (advanced)",
+  cancelEnroll: "Cancel request",
   auto: "Auto",
   reset: "Factory reset",
   resetDesc: "Clears all plugin settings and resets PINs (DSH data untouched)",
@@ -309,6 +328,47 @@ function RelaySettingsTab({ rpcCall, t }) {
   };
   const wanOn = st?.relayRunning === true;
   const wanConfigured = Boolean(cfg.url);
+  const enroll = st?.enroll ?? { phase: "idle", detail: "" };
+  const [enrollForm, setEnrollForm] = (0, import_react.useState)({ url: "", code: "" });
+  const [manualMode, setManualMode] = (0, import_react.useState)(false);
+  const doEnroll = () => {
+    if (!enrollForm.url) return;
+    void apply2(() => call(RELAY_ENDPOINTS.relayEnroll, { url: enrollForm.url, code: enrollForm.code }));
+  };
+  const enrollActive = ["submitting", "pending", "approved"].includes(enroll.phase);
+  const enrollStatusLine = enroll.phase === "idle" || !enroll.detail ? null : enroll.phase === "done" || enroll.phase === "approved" ? (0, import_react.createElement)("div", { style: { color: "var(--dsw-alias-state-success-primary,#16a34a)", fontSize: 12, marginTop: 8 } }, "\u2713 " + errText(enroll.detail)) : (0, import_react.createElement)(
+    "div",
+    { style: { marginTop: 8 } },
+    (0, import_react.createElement)("div", { style: enrollActive ? S.warn : S.err }, errText(enroll.detail)),
+    enrollActive ? (0, import_react.createElement)("button", { style: { ...S.mini, marginTop: 6 }, onClick: () => apply2(() => call(RELAY_ENDPOINTS.relayEnrollCancel, {})) }, t("cancelEnroll")) : null
+  );
+  const enrollFormBlock = (0, import_react.createElement)(
+    "div",
+    null,
+    (0, import_react.createElement)("div", { style: { fontWeight: 600, fontSize: 13, marginBottom: 8 } }, t("enrollTitle")),
+    (0, import_react.createElement)("div", { style: S.field }, t("cfgStep1")),
+    (0, import_react.createElement)("input", {
+      style: S.input,
+      placeholder: t("serverPlaceholder"),
+      value: enrollForm.url,
+      autoFocus: true,
+      onChange: (e) => setEnrollForm((c) => ({ ...c, url: e.target.value.trim() }))
+    }),
+    (0, import_react.createElement)("div", { style: { ...S.field, marginTop: 8 } }, t("enrollCodeLabel")),
+    (0, import_react.createElement)("input", {
+      style: S.input,
+      placeholder: t("enrollCodePh"),
+      value: enrollForm.code,
+      onChange: (e) => setEnrollForm((c) => ({ ...c, code: e.target.value.trim() }))
+    }),
+    (0, import_react.createElement)(
+      "div",
+      { style: { display: "flex", gap: 8, marginTop: 12, alignItems: "center", flexWrap: "wrap" } },
+      (0, import_react.createElement)("button", { style: S.primary, disabled: busy || !enrollForm.url || enrollActive, onClick: doEnroll }, t("enrollBtn")),
+      (0, import_react.createElement)("span", { style: S.muted }, t("enrollHint"))
+    ),
+    enrollStatusLine
+  );
   const wanCfgForm = (0, import_react.createElement)(
     "div",
     null,
@@ -384,11 +444,27 @@ function RelaySettingsTab({ rpcCall, t }) {
       )
     );
   }
+  const toggleManual = (0, import_react.createElement)(
+    "div",
+    { style: { marginTop: 10 } },
+    (0, import_react.createElement)(
+      "button",
+      { style: S.mini, onClick: () => setManualMode((m) => !m) },
+      manualMode ? t("enrollBack") : t("manualToken")
+    )
+  );
+  const manualEntry = manualMode || wanConfigured || cfgEdit ? (0, import_react.createElement)(
+    "div",
+    { style: { marginTop: 12, paddingTop: 12, borderTop: "1px solid var(--dsw-alias-border-l2,#e5e7eb)" } },
+    !manualMode && wanConfigured && !cfgEdit ? wanHead : null,
+    cfgEdit ? wanEditForm : null,
+    manualMode && !wanConfigured && !cfgEdit ? wanCfgForm : null
+  ) : null;
   const wanBlock = (0, import_react.createElement)(
     "div",
     { style: S.card },
-    !wanOn && !wanConfigured ? wanCfgForm : wanHead,
-    cfgEdit ? wanEditForm : null,
+    !wanOn ? (0, import_react.createElement)("div", null, enrollFormBlock, toggleManual, manualEntry) : wanHead,
+    wanOn && cfgEdit ? wanEditForm : null,
     !wanOn ? wanStart : null,
     wanOn ? wanQr : null
   );

@@ -33,6 +33,9 @@ const defaults = {
   tokenFile: (process.env.RELAY_TOKEN_FILE ?? '').trim(),
   adminPassword: (process.env.RELAY_ADMIN_PASSWORD ?? '').trim(), // WebUI 管理密码
   adminPasswordFile: (process.env.RELAY_ADMIN_PASSWORD_FILE ?? '').trim(),
+  settingsFile: (process.env.RELAY_SETTINGS_FILE ?? '').trim(), // 管理台可改配置的持久化
+  rotateDays: Number(process.env.RELAY_ROTATE_DAYS ?? 30),       // 密钥自动轮换周期（0=关）
+  enrollCode: (process.env.RELAY_ENROLL_CODE ?? '').trim(),      // 非空 = 申请需邀请码
   tlsCert: (process.env.RELAY_TLS_CERT ?? '').trim(),
   tlsKey: (process.env.RELAY_TLS_KEY ?? '').trim(),
   poolHint: Number(process.env.RELAY_POOL_HINT ?? 8), // 建议插件维持的池大小（hello 里带给插件）
@@ -66,7 +69,9 @@ export function normalizeClients(raw) {
       seenDomain.add(domain);
     }
     seenId.add(id); seenToken.add(token);
-    return { id, token, domain };
+    const out = { id, token, domain };
+    if (Number.isFinite(c?.issuedAt)) out.issuedAt = c.issuedAt; // 密钥签发时间（自动轮换用）
+    return out;
   });
 }
 
@@ -75,7 +80,10 @@ function loadClients(cfg) {
   if (Array.isArray(cfg.clients)) return normalizeClients(cfg.clients);
   if (cfg.clientsFile) {
     const raw = JSON.parse(readFileSync(cfg.clientsFile, 'utf8'));
-    return normalizeClients(raw.clients ?? raw);
+    const list = raw.clients ?? raw;
+    // 准入模式允许空注册表引导启动（等第一批客户端申请进来）
+    if (Array.isArray(list) && list.length === 0) return [];
+    return normalizeClients(list);
   }
   const token = cfg.token || (() => {
     try { return readFileSync(cfg.tokenFile, 'utf8').trim(); } catch { return ''; }
@@ -89,20 +97,28 @@ export function createRelayServer(overrides = {}) {
   const registry = loadClients(cfg);
 
   // ---------- 运行状态 ----------
-  /** @type {Map<string,{id,token,domain,startedAt,connIdSeq,ctl,phoneConns,idleData}>} */
+  /** @type {Map<string,{id,token,domain,issuedAt,startedAt,connIdSeq,ctl,phoneConns,idleData,clientIp,identity,graceTokens}>} */
   const sessions = new Map();
   for (const c of registry) {
     sessions.set(c.id, {
       ...c,
+      issuedAt: c.issuedAt ?? Date.now(),
       startedAt: Date.now(),
       connIdSeq: 0,
       ctl: null,
+      clientIp: '',
+      identity: null, // 客户端上报的身份档案 {hostname,os,macs,ips,version}
+      /** @type {Map<string,number>} 轮换宽限期的旧 token -> 过期时间 */
+      graceTokens: new Map(),
       /** @type {Map<number,{ws:WebSocket, peer:net.Socket}>} 已绑定的手机流 */
       phoneConns: new Map(),
       /** @type {Set<WebSocket>} 空闲 data 连接 */
       idleData: new Set(),
     });
   }
+  // registry 与 session 保持同一对象：轮换/改名即原地更新
+  registry.length = 0;
+  registry.push(...sessions.values());
   const state = {
     startedAt: Date.now(),
     httpPort: null, // 内部 http server（插件 WS upgrade）端口
@@ -126,7 +142,15 @@ export function createRelayServer(overrides = {}) {
     return defaultSession();
   };
   const resolveByToken = (t) => {
-    for (const s of sessions.values()) if (tokenEqual(t, s.token)) return s;
+    const now = Date.now();
+    for (const s of sessions.values()) {
+      if (tokenEqual(t, s.token)) return { s, usedGrace: false };
+      // 轮换宽限期内的旧 token 仍然可用（给插件时间无感换新）
+      for (const [old, until] of [...s.graceTokens]) {
+        if (until < now) { s.graceTokens.delete(old); continue; }
+        if (tokenEqual(t, old)) return { s, usedGrace: true };
+      }
+    }
     return null;
   };
 
@@ -166,9 +190,109 @@ export function createRelayServer(overrides = {}) {
     adminPassword = crypto.randomBytes(12).toString('base64url');
     log(`admin password (ephemeral! 未配置 RELAY_ADMIN_PASSWORD[_FILE]): ${adminPassword}`);
   }
-  const adminCookieValue = crypto.createHash('sha256').update(`dsh-relay-admin|${adminPassword}`).digest('hex');
+  let adminCookieValue = crypto.createHash('sha256').update(`dsh-relay-admin|${adminPassword}`).digest('hex');
   // 只有注册表来自文件时才允许页面增删（回写才有落点）
   const adminMutable = !!cfg.clientsFile;
+
+  // ---------- 管理台可改配置（env 为默认，settings.json 可覆盖） ----------
+  let settings = {
+    enrollCode: cfg.enrollCode || '',
+    rotateDays: Number.isFinite(cfg.rotateDays) && cfg.rotateDays >= 0 ? cfg.rotateDays : 30,
+    poolHint: cfg.poolHint,
+    bindWaitMs: cfg.bindWaitMs,
+  };
+  let settingsMutable = !!cfg.settingsFile;
+  if (cfg.settingsFile) {
+    try {
+      const saved = JSON.parse(readFileSync(cfg.settingsFile, 'utf8'));
+      if ('enrollCode' in saved) settings.enrollCode = String(saved.enrollCode ?? '');
+      if (Number.isFinite(saved.rotateDays)) settings.rotateDays = Math.max(0, saved.rotateDays);
+      if (Number.isFinite(saved.poolHint) && saved.poolHint >= 1 && saved.poolHint <= 64) settings.poolHint = saved.poolHint;
+      if (Number.isFinite(saved.bindWaitMs) && saved.bindWaitMs >= 500 && saved.bindWaitMs <= 60_000) settings.bindWaitMs = saved.bindWaitMs;
+    } catch { /* 首次没有文件 */ }
+  }
+  function persistSettings() {
+    if (!cfg.settingsFile) throw new Error('配置不可持久化（未配置 RELAY_SETTINGS_FILE）');
+    writeFileSync(`${cfg.settingsFile}.tmp`, `${JSON.stringify(settings, null, 2)}\n`, { mode: 0o600 });
+    renameSync(`${cfg.settingsFile}.tmp`, cfg.settingsFile);
+  }
+
+  // ---------- 事件日志（内存环形，最多 200 条） ----------
+  const events = [];
+  function pushEvent(type, text) {
+    events.push({ ts: Date.now(), type, text });
+    if (events.length > 200) events.splice(0, events.length - 200);
+  }
+
+  // ---------- 密钥轮换（手动 + 自动；旧 token 宽限 10 分钟） ----------
+  function rotateClient(s, reason) {
+    const old = s.token;
+    const token = crypto.randomBytes(24).toString('hex');
+    s.token = token;
+    s.issuedAt = Date.now();
+    if (!tokenEqual(old, token)) s.graceTokens.set(old, Date.now() + 10 * 60_000);
+    // 通过已认证的控制通道无感推送新密钥；推送丢失也没关系——旧 token 在宽限期内仍可用，
+    // 自动轮换的下个周期会再次触发（age 仍超阈值），自愈。
+    ctlSend(s, { type: 'rotate', token });
+    pushEvent('rotate', `客户端 ${s.id} 密钥已轮换（${reason}）`);
+    log(`token rotated for client ${s.id} (${reason})`);
+    return token;
+  }
+  const rotateTimer = setInterval(() => {
+    if (!(settings.rotateDays > 0)) return;
+    const now = Date.now();
+    for (const s of sessions.values()) {
+      if (s.issuedAt && now - s.issuedAt > settings.rotateDays * 86_400_000) rotateClient(s, `${settings.rotateDays} 天自动轮换`);
+    }
+  }, 3600_000);
+  rotateTimer.unref?.();
+
+  // ---------- 准入申请（enrollment） ----------
+  // 流程：插件 POST /__relay/enroll（带身份档案）→ 管理台提示 → 批准后密钥经 poll 下发。
+  // 待审批只存内存（重启即失），插件 poll 到 expired 会自动重新申请——无状态孤儿。
+  const ENROLL_EXPIRE_MS = 10 * 60_000;
+  const ENROLL_PENDING_CAP = 8;
+  /** @type {Map<string,{id,info,sourceIp,createdAt,status:'pending'|'approved'|'denied',result?:{clientId,token}}>} */
+  const enrollPending = new Map();
+  const enrollHits = new Map(); // 每 IP 频率限制
+  function enrollRateOk(ip, max) {
+    const now = Date.now();
+    let rec = enrollHits.get(ip);
+    if (!rec || now - rec.windowStart > 60_000) rec = { count: 0, windowStart: now };
+    rec.count += 1;
+    enrollHits.set(ip, rec);
+    if (enrollHits.size > 2000) {
+      for (const [k, v] of enrollHits) if (now - v.windowStart > 120_000) enrollHits.delete(k);
+    }
+    return rec.count <= max;
+  }
+  function sanitizeIdentity(raw) {
+    if (!raw || typeof raw !== 'object') return null;
+    const str = (v, n) => String(v ?? '').slice(0, n);
+    const arr = (v, n, m) => Array.isArray(v) ? v.slice(0, m).map((x) => str(x, n)).filter(Boolean) : [];
+    return {
+      hostname: str(raw.hostname, 64),
+      os: str(raw.os, 64),
+      macs: arr(raw.macs, 32, 8),
+      ips: arr(raw.ips, 64, 8),
+      version: str(raw.version, 32),
+    };
+  }
+  function enrollPendingList() {
+    const now = Date.now();
+    const out = [];
+    for (const [id, r] of [...enrollPending]) {
+      if (r.status === 'pending' && now - r.createdAt > ENROLL_EXPIRE_MS) {
+        enrollPending.delete(id);
+        pushEvent('enroll', `申请 ${id.slice(0, 8)} 过期（${r.info?.hostname || '未知设备'}）`);
+        continue;
+      }
+      if (r.status === 'pending') {
+        out.push({ id, createdAt: r.createdAt, sourceIp: r.sourceIp, info: r.info });
+      }
+    }
+    return out;
+  }
 
   /** 关闭某客户端的全部连接（页面删除客户端时调用）。 */
   function closeSession(s) {
@@ -193,11 +317,22 @@ export function createRelayServer(overrides = {}) {
     const rebuilt = [];
     for (const c of next) {
       const cur = sessions.get(c.id);
-      if (cur) { cur.token = c.token; cur.domain = c.domain; }
-      else {
+      if (cur) {
+        cur.token = c.token;
+        cur.domain = c.domain;
+        if (Number.isFinite(c.issuedAt)) cur.issuedAt = c.issuedAt;
+      } else {
         sessions.set(c.id, {
-          ...c, startedAt: Date.now(), connIdSeq: 0, ctl: null,
-          phoneConns: new Map(), idleData: new Set(),
+          ...c,
+          issuedAt: c.issuedAt ?? Date.now(),
+          startedAt: Date.now(),
+          connIdSeq: 0,
+          ctl: null,
+          clientIp: '',
+          identity: null,
+          graceTokens: new Map(),
+          phoneConns: new Map(),
+          idleData: new Set(),
         });
       }
       rebuilt.push(sessions.get(c.id));
@@ -210,7 +345,10 @@ export function createRelayServer(overrides = {}) {
   function persistClients() {
     if (!cfg.clientsFile) throw new Error('注册表不可持久化（未配置 RELAY_CLIENTS_FILE）');
     const body = JSON.stringify({
-      clients: registry.map((c) => ({ id: c.id, token: c.token, ...(c.domain ? { domain: c.domain } : {}) })),
+      clients: registry.map((c) => ({
+        id: c.id, token: c.token, issuedAt: c.issuedAt,
+        ...(c.domain ? { domain: c.domain } : {}),
+      })),
     }, null, 2);
     writeFileSync(`${cfg.clientsFile}.tmp`, `${body}\n`, { mode: 0o600 });
     renameSync(`${cfg.clientsFile}.tmp`, cfg.clientsFile);
@@ -264,7 +402,7 @@ export function createRelayServer(overrides = {}) {
     try { return JSON.parse(text || '{}'); } catch { return null; }
   }
   function cloneRegistry() {
-    return registry.map((c) => ({ id: c.id, token: c.token, domain: c.domain }));
+    return registry.map((c) => ({ id: c.id, token: c.token, domain: c.domain, issuedAt: c.issuedAt }));
   }
 
   async function adminRequest(req, res) {
@@ -275,6 +413,44 @@ export function createRelayServer(overrides = {}) {
       res.end(ADMIN_HTML);
       return;
     }
+
+    // ---------- 准入申请（公开端点，无需登录；严格限速 + 可选邀请码） ----------
+    if (p === '/__relay/enroll' && req.method === 'POST') {
+      const ip = req.socket.remoteAddress ?? 'unknown';
+      if (!enrollRateOk(`e:${ip}`, 10)) { json(res, 429, { ok: false, error: 'rate-limited' }); return; }
+      const body = parseJsonSafe(await readBody(req));
+      const info = sanitizeIdentity(body?.info);
+      if (!info || !info.hostname) { json(res, 400, { ok: false, error: 'bad-identity' }); return; }
+      if (settings.enrollCode && !tokenEqual(String(body?.code ?? ''), settings.enrollCode)) {
+        pushEvent('enroll', `申请被拒：邀请码错误（${ip}）`);
+        json(res, 403, { ok: false, error: 'bad-code' });
+        return;
+      }
+      if (enrollPendingList().length >= ENROLL_PENDING_CAP) { json(res, 429, { ok: false, error: 'pending-full' }); return; }
+      const id = crypto.randomBytes(12).toString('hex');
+      enrollPending.set(id, { id, info, sourceIp: ip, createdAt: Date.now(), status: 'pending' });
+      pushEvent('enroll', `新接入申请：${info.hostname}（${info.os || '?'} · 来自 ${ip}）`);
+      log(`enroll request from ${ip} (${info.hostname})`);
+      json(res, 200, { ok: true, requestId: id });
+      return;
+    }
+    if (p === '/__relay/enroll/poll' && req.method === 'POST') {
+      const ip = req.socket.remoteAddress ?? 'unknown';
+      if (!enrollRateOk(`p:${ip}`, 60)) { json(res, 429, { ok: false, error: 'rate-limited' }); return; }
+      const body = parseJsonSafe(await readBody(req));
+      const r = enrollPending.get(String(body?.requestId ?? ''));
+      if (!r || (r.status === 'pending' && Date.now() - r.createdAt > ENROLL_EXPIRE_MS)) {
+        enrollPending.delete(String(body?.requestId ?? ''));
+        json(res, 200, { ok: true, status: 'expired' });
+        return;
+      }
+      if (r.status === 'pending') { json(res, 200, { ok: true, status: 'pending' }); return; }
+      enrollPending.delete(r.id);
+      if (r.status === 'approved') json(res, 200, { ok: true, status: 'approved', clientId: r.result.clientId, token: r.result.token });
+      else json(res, 200, { ok: true, status: 'denied' });
+      return;
+    }
+
     if (!p.startsWith('/__relay/admin/api/')) { json(res, 404, { ok: false, error: 'not-found' }); return; }
 
     if (p === '/__relay/admin/api/login' && req.method === 'POST') {
@@ -307,7 +483,10 @@ export function createRelayServer(overrides = {}) {
         server: `dsh-relay-server/${PKG_VERSION}`,
         insecure: !buildTlsOptions(),
         mutable: adminMutable,
+        settingsMutable,
         uptime: Math.floor((Date.now() - state.startedAt) / 1000),
+        settings: { ...settings, enrollCodeSet: !!settings.enrollCode },
+        pendingCount: enrollPendingList().length,
         clients: registry.map((c) => {
           const s = sessions.get(c.id);
           return {
@@ -317,9 +496,116 @@ export function createRelayServer(overrides = {}) {
             phone: s?.phoneConns.size ?? 0,
             idle: s?.idleData.size ?? 0,
             tokenHint: `${c.token.slice(0, 6)}…`,
+            issuedAt: c.issuedAt,
+            rotateDays: settings.rotateDays,
+            clientIp: s?.clientIp ?? '',
+            startedAt: s?.startedAt,
+            identity: s?.identity ?? null,
           };
         }),
       });
+      return;
+    }
+    if (p === '/__relay/admin/api/events' && req.method === 'GET') {
+      json(res, 200, { ok: true, events: events.slice(-100).reverse() });
+      return;
+    }
+    if (p === '/__relay/admin/api/enroll/list' && req.method === 'GET') {
+      json(res, 200, { ok: true, pending: enrollPendingList() });
+      return;
+    }
+    if (p === '/__relay/admin/api/enroll/approve' && req.method === 'POST') {
+      if (!adminMutable) { json(res, 400, { ok: false, error: 'not-mutable', message: '需以 RELAY_CLIENTS_FILE 方式启动才能批准接入' }); return; }
+      const body = parseJsonSafe(await readBody(req));
+      const r = enrollPending.get(String(body?.requestId ?? ''));
+      if (!r || r.status !== 'pending') { json(res, 404, { ok: false, error: 'no-such-request' }); return; }
+      // 客户端 id：管理员指定 > 主机名 slug > client-N；冲突自动加后缀
+      let id = String(body?.clientId ?? '').trim().toLowerCase();
+      if (!/^[a-z0-9][a-z0-9-]{0,63}$/.test(id)) {
+        id = String(r.info?.hostname ?? '').toLowerCase().replace(/[^a-z0-9-]+/g, '-').replace(/^-+|-+$/g, '').slice(0, 32);
+      }
+      if (!id) id = 'client';
+      let unique = id;
+      for (let i = 2; sessions.has(unique); i++) unique = `${id}-${i}`.slice(0, 64);
+      const token = crypto.randomBytes(24).toString('hex');
+      const domain = String(body?.domain ?? '').trim();
+      const prev = cloneRegistry();
+      try {
+        applyRegistry([...prev, { id: unique, token, domain }]);
+        persistClients();
+      } catch (e) {
+        applyRegistry(prev);
+        try { persistClients(); } catch { /* 同上 */ }
+        json(res, 400, { ok: false, error: 'invalid', message: e.message });
+        return;
+      }
+      r.status = 'approved';
+      r.result = { clientId: unique, token };
+      sessions.get(unique).identity = r.info; // 申请时的身份档案直接入档
+      pushEvent('enroll', `已批准接入：${r.info?.hostname || unique} → 客户端「${unique}」`);
+      log(`enroll approved: ${unique} (${r.info?.hostname})`);
+      json(res, 200, { ok: true, clientId: unique });
+      return;
+    }
+    if (p === '/__relay/admin/api/enroll/deny' && req.method === 'POST') {
+      const body = parseJsonSafe(await readBody(req));
+      const r = enrollPending.get(String(body?.requestId ?? ''));
+      if (!r || r.status !== 'pending') { json(res, 404, { ok: false, error: 'no-such-request' }); return; }
+      r.status = 'denied';
+      pushEvent('enroll', `已拒绝接入：${r.info?.hostname || r.sourceIp}`);
+      log(`enroll denied: ${r.info?.hostname}`);
+      json(res, 200, { ok: true });
+      return;
+    }
+    if (p === '/__relay/admin/api/clients/rotate' && req.method === 'POST') {
+      const body = parseJsonSafe(await readBody(req));
+      const s = sessions.get(String(body?.id ?? ''));
+      if (!s) { json(res, 404, { ok: false, error: 'no-such-client' }); return; }
+      if (!cfg.clientsFile) { json(res, 400, { ok: false, error: 'not-mutable' }); return; }
+      try { persistClients(); } catch (e) { json(res, 500, { ok: false, error: 'persist-failed', message: e.message }); return; }
+      rotateClient(s, '管理员手动轮换');
+      json(res, 200, { ok: true });
+      return;
+    }
+    if (p === '/__relay/admin/api/settings' && req.method === 'POST') {
+      const body = parseJsonSafe(await readBody(req));
+      if (!body) { json(res, 400, { ok: false, error: 'bad-json' }); return; }
+      if ('enrollCode' in body) settings.enrollCode = String(body.enrollCode ?? '').trim();
+      if ('rotateDays' in body) {
+        const v = Number(body.rotateDays);
+        if (!Number.isFinite(v) || v < 0 || v > 3650) { json(res, 400, { ok: false, error: 'bad-rotate-days' }); return; }
+        settings.rotateDays = Math.floor(v);
+      }
+      if ('poolHint' in body) {
+        const v = Number(body.poolHint);
+        if (!Number.isFinite(v) || v < 1 || v > 64) { json(res, 400, { ok: false, error: 'bad-pool-hint' }); return; }
+        settings.poolHint = Math.floor(v);
+      }
+      if ('bindWaitMs' in body) {
+        const v = Number(body.bindWaitMs);
+        if (!Number.isFinite(v) || v < 500 || v > 60_000) { json(res, 400, { ok: false, error: 'bad-bind-wait' }); return; }
+        settings.bindWaitMs = Math.floor(v);
+      }
+      if (settingsMutable) {
+        try { persistSettings(); } catch (e) { json(res, 500, { ok: false, error: 'persist-failed', message: e.message }); return; }
+      }
+      pushEvent('settings', `管理台更新了配置（轮换=${settings.rotateDays}天，邀请码=${settings.enrollCode ? '开' : '关'}）`);
+      json(res, 200, { ok: true, settings: { ...settings, enrollCodeSet: !!settings.enrollCode }, persisted: settingsMutable });
+      return;
+    }
+    if (p === '/__relay/admin/api/password' && req.method === 'POST') {
+      const body = parseJsonSafe(await readBody(req));
+      if (!body || !tokenEqual(String(body.current ?? ''), adminPassword)) { json(res, 401, { ok: false, error: 'wrong-password' }); return; }
+      const next = String(body.next ?? '');
+      if (next.length < 8) { json(res, 400, { ok: false, error: 'too-short', message: '新密码至少 8 位' }); return; }
+      adminPassword = next;
+      adminCookieValue = crypto.createHash('sha256').update(`dsh-relay-admin|${adminPassword}`).digest('hex');
+      let persisted = false;
+      if (cfg.adminPasswordFile) {
+        try { writeFileSync(cfg.adminPasswordFile, `${adminPassword}\n`, { mode: 0o600 }); persisted = true; } catch { /* 只读盘 */ }
+      }
+      pushEvent('settings', '管理员密码已修改');
+      json(res, 200, { ok: true, persisted });
       return;
     }
     if (p === '/__relay/admin/api/clients/add' && req.method === 'POST') {
@@ -340,7 +626,27 @@ export function createRelayServer(overrides = {}) {
         return;
       }
       log(`admin: client "${id}" added (domain=${domain || '(default 裸IP)'})`);
+      pushEvent('clients', `管理员创建客户端「${id}」${domain ? `（域名 ${domain}）` : '（默认·裸IP）'}`);
       json(res, 200, { ok: true, token }); // token 只在这里完整返回一次
+      return;
+    }
+    if (p === '/__relay/admin/api/clients/domain' && req.method === 'POST') {
+      if (!adminMutable) { json(res, 400, { ok: false, error: 'not-mutable', message: '需以 RELAY_CLIENTS_FILE 方式启动才能修改域名' }); return; }
+      const body = parseJsonSafe(await readBody(req));
+      const s = sessions.get(String(body?.id ?? ''));
+      if (!s) { json(res, 404, { ok: false, error: 'no-such-client' }); return; }
+      const domain = String(body?.domain ?? '').trim().toLowerCase().replace(/:\d+$/, '');
+      const prev = cloneRegistry();
+      try {
+        applyRegistry(prev.map((c) => (c.id === s.id ? { ...c, domain } : c)));
+        persistClients();
+      } catch (e) {
+        applyRegistry(prev);
+        json(res, 400, { ok: false, error: 'invalid', message: e.message });
+        return;
+      }
+      pushEvent('clients', `客户端「${s.id}」域名改为 ${domain || '（默认·裸IP）'}`);
+      json(res, 200, { ok: true });
       return;
     }
     if (p === '/__relay/admin/api/clients/remove' && req.method === 'POST') {
@@ -359,6 +665,7 @@ export function createRelayServer(overrides = {}) {
         return;
       }
       log(`admin: client "${id}" removed`);
+      pushEvent('clients', `管理员删除客户端「${id}」`);
       json(res, 200, { ok: true });
       return;
     }
@@ -388,13 +695,17 @@ export function createRelayServer(overrides = {}) {
   // ---------- 插件通道（WS） ----------
   const wss = new WebSocketServer({ noServer: true });
 
-  function onControl(s, ws) {
+  function onControl(s, ws, ip, usedGrace = false) {
     log(`plugin control connected (client=${s.id})`);
+    s.clientIp = ip;
+    pushEvent('connect', `客户端 ${s.id} 已连接（${ip}）`);
     if (s.ctl && s.ctl.readyState === WebSocket.OPEN) {
       try { s.ctl.close(4000, 'replaced'); } catch { /* 忽略 */ }
     }
     s.ctl = ws;
-    ws.send(JSON.stringify({ type: 'hello', server: `dsh-relay-server/${PKG_VERSION}`, protocol: 1, client: s.id, pool: cfg.poolHint }));
+    ws.send(JSON.stringify({ type: 'hello', server: `dsh-relay-server/${PKG_VERSION}`, protocol: 1, client: s.id, pool: settings.poolHint }));
+    // 客户端还在用旧 token（轮换推送丢了）：立刻补发新密钥，形成闭环
+    if (usedGrace) ctlSend(s, { type: 'rotate', token: s.token });
     ctlSend(s, { type: 'stats', ...clientStats(s) });
 
     ws.on('message', (raw, isBinary) => {
@@ -402,10 +713,12 @@ export function createRelayServer(overrides = {}) {
       let msg;
       try { msg = JSON.parse(String(raw)); } catch { return; }
       if (msg?.type === 'ping') ws.send(JSON.stringify({ type: 'pong', t: msg.t ?? 0 }));
+      else if (msg?.type === 'info') s.identity = sanitizeIdentity(msg.info) ?? s.identity;
     });
     const drop = () => {
       if (s.ctl === ws) s.ctl = null;
       log(`plugin control lost (client=${s.id})`);
+      pushEvent('disconnect', `客户端 ${s.id} 连接断开`);
       // 控制连接没了：该客户端已绑定手机流的对端已死，全部关闭（浏览器会自动重试）
       for (const conn of [...s.phoneConns.values()]) {
         try { conn.ws.close(1001, 'plugin offline'); } catch { /* 忽略 */ }
@@ -437,17 +750,18 @@ export function createRelayServer(overrides = {}) {
       socket.destroy();
       return;
     }
-    const s = resolveByToken(req.headers['x-relay-token']);
-    if (!s) {
+    const resolved = resolveByToken(req.headers['x-relay-token']);
+    if (!resolved) {
       recordTokenFail(ip);
       log(`auth failed from ${ip} (${url})`);
       socket.write('HTTP/1.1 401 Unauthorized\r\nConnection: close\r\n\r\n');
       socket.destroy();
       return;
     }
+    const { s, usedGrace } = resolved;
 
     if (url === '/__relay/ctl') {
-      wss.handleUpgrade(req, socket, head, (ws) => onControl(s, ws));
+      wss.handleUpgrade(req, socket, head, (ws) => onControl(s, ws, ip, usedGrace));
     } else if (url === '/__relay/data') {
       wss.handleUpgrade(req, socket, head, (ws) => onDataSocket(s, ws));
     } else {
