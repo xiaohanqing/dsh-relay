@@ -1,4 +1,6 @@
-// dsh-relay 设置页（原创 UI，双语）
+// dsh-relay 设置页 v2：围绕「NAS 中继」自有的信息架构设计
+//   顶部状态横幅（状态灯 + 主操作）→ 公网访问（引导式配置）→ 局域网（次级）→ 高级
+// 与平台设计令牌对齐，但布局与交互为本项目原创。
 import { createElement as h, useEffect, useRef, useState } from 'react';
 import { RELAY_RPC_CHANNEL, RELAY_ENDPOINTS, redactStatus } from './api.js';
 
@@ -6,315 +8,280 @@ const name = 'dsh-relay';
 const inject = ['connection', 'slots', 'locale'];
 
 const zh = {
-  section: 'DSH Relay',
   localeTag: 'zh',
-  title: '手机访问（自建中继）',
-  subtitle: '局域网扫码直连；外网经你自己的 NAS 中继，不依赖第三方云',
-  lanAccess: '局域网访问',
-  lanPin: '局域网密码',
-  lanAuthSwitch: '密码保护',
-  lanDisabledHint: '局域网访问已关闭，扫码/链接不可用',
-  lanStarting: '正在获取局域网地址…',
-  wanAccess: 'NAS 中继（外网访问）',
-  enable: '开启',
-  opening: '开启中…',
-  stopRelay: '关闭',
-  serverLabel: '服务端地址',
-  tokenLabel: 'Token',
-  serverPlaceholder: 'nas.example.com 或 nas.example.com:8443',
-  tokenPlaceholder: 'NAS 上 RELAY_TOKEN 的值',
-  save: '保存',
-  cancel: '取消',
-  edit: '修改',
-  needCfg: '请先填写服务端地址和 Token',
-  stateReady: '已连接 NAS，外网可访问',
-  stateReconnecting: '连接断开，正在重连…',
-  stateConnecting: '正在连接 NAS…',
-  stateIdle: '未开启',
-  retryInfo: '第 {n} 次重试 · 约 {s} 秒后',
-  nasStats: '手机连接数 {phone} · 池空闲 {idle}',
-  pinLabel: '访问密码',
-  pinCustomHint: '已自定义',
-  refresh: '刷新',
-  customize: '自定义',
-  customizing: '设置为',
-  resetFactory: '恢复出厂设置',
-  resetGo: '重置',
-  resetIntro: '清空本插件设置并重置访问密码，不影响 DSH 其它数据',
-  resetTitle: '确认恢复出厂设置？',
-  resetBody: '将清空服务端地址、Token、开关与自定义密码，并重置访问密码。手机需要重新输入密码。',
+  appTitle: 'DSH Relay',
+  appSub: '通过你自己的 NAS 从任何网络访问这台电脑上的 DSH',
+  stReady: '已连接 NAS · 外网可访问',
+  stConnecting: '正在连接 NAS…',
+  stReconnecting: '连接中断，自动重连中',
+  stIdle: '未开启',
+  stError: '连接错误',
+  openRelay: '开启外网访问',
+  stopRelay: '停止',
+  opening: '连接中…',
+  secWan: '外网访问（经 NAS 中继）',
+  secLan: '局域网直连',
+  cfgTitle: '连接到你的 NAS',
+  cfgStep1: '① NAS 服务端地址',
+  cfgStep2: '② 部署时生成的 Token',
+  serverPlaceholder: 'nas.example.com 或 192.168.1.10:8443',
+  tokenPlaceholder: 'RELAY_TOKEN 的值',
+  cfgSave: '保存并连接',
+  cfgSaveOnly: '保存',
+  cfgEdit: '修改服务端',
+  cfgCurrent: '当前服务端',
+  qrHintWan: '手机浏览器打开此地址（任意网络）',
+  qrHintLan: '手机连同一 WiFi 扫码直达',
+  wanOffHint: '开启后，手机在任意网络都能通过你的 NAS 访问这里。',
+  pinTitle: '访问密码',
+  pinDesc: '8 位字母/数字；自定义后不再轮换',
+  lanPinDesc: '局域网入口的独立密码',
+  lanSwitch: '局域网入口',
+  lanAuthSwitch: '局域网密码',
+  lanOff: '局域网入口已关闭',
+  nasStats: 'NAS 实时：{phone} 台设备在线 · 隧道池空闲 {idle}',
+  retryInfo: '第 {n} 次重试 · 约 {s} 秒后自动重试',
+  adv: '高级',
+  advAddress: '局域网地址',
+  auto: '自动选择',
+  reset: '恢复出厂',
+  resetDesc: '清空本插件全部设置并重置密码（不影响 DSH 其它数据）',
+  resetTitle: '恢复出厂设置？',
+  resetBody: '服务端地址、Token、开关与自定义密码都会被清空，密码重置后手机需要重新输入。',
   confirm: '确认',
-  confirmRelay: '开启外网访问？',
-  relayConfirmBody: '外网将能通过你的 NAS 访问这台电脑上的 DSH（可执行代码）。请确保：\n1. NAS 已部署 dsh-relay-server 且端口未对公网误开放其它服务\n2. 访问密码不要泄露（二维码即钥匙）',
-  error: '错误：{msg}',
-  unknown: '未知错误',
+  cancel: '取消',
+  copy: '复制',
+  errPrefix: '出错了：',
 };
 
 const en = {
-  
   localeTag: 'en',
-  title: 'Phone Access (Self-hosted Relay)',
-  subtitle: 'LAN via QR; internet via your own NAS relay — no third-party cloud',
-  lanAccess: 'LAN Access',
-  lanPin: 'LAN PIN',
-  lanAuthSwitch: 'PIN protection',
-  lanDisabledHint: 'LAN access is disabled',
-  lanStarting: 'Detecting LAN address…',
-  wanAccess: 'NAS Relay (Internet)',
-  enable: 'Enable',
-  opening: 'Starting…',
+  appTitle: 'DSH Relay',
+  appSub: 'Reach the DSH on this computer from any network via your own NAS',
+  stReady: 'Connected to NAS · internet access active',
+  stConnecting: 'Connecting to NAS…',
+  stReconnecting: 'Connection lost, reconnecting',
+  stIdle: 'Off',
+  stError: 'Connection error',
+  openRelay: 'Enable internet access',
   stopRelay: 'Stop',
-  serverLabel: 'Server address',
-  tokenLabel: 'Token',
-  serverPlaceholder: 'nas.example.com or nas.example.com:8443',
-  tokenPlaceholder: 'RELAY_TOKEN value from your NAS',
-  save: 'Save',
-  cancel: 'Cancel',
-  edit: 'Edit',
-  needCfg: 'Set the server address and token first',
-  stateReady: 'Connected — internet access active',
-  stateReconnecting: 'Connection lost, reconnecting…',
-  stateConnecting: 'Connecting…',
-  stateIdle: 'Off',
+  opening: 'Connecting…',
+  secWan: 'Internet (via NAS relay)',
+  secLan: 'LAN direct',
+  cfgTitle: 'Connect to your NAS',
+  cfgStep1: '① Relay server address',
+  cfgStep2: '② Token generated at deploy time',
+  serverPlaceholder: 'nas.example.com or 192.168.1.10:8443',
+  tokenPlaceholder: 'value of RELAY_TOKEN',
+  cfgSave: 'Save & connect',
+  cfgSaveOnly: 'Save',
+  cfgEdit: 'Edit server',
+  cfgCurrent: 'Server',
+  qrHintWan: 'Open on your phone (any network)',
+  qrHintLan: 'Same Wi-Fi: scan to open',
+  wanOffHint: 'Once enabled, your phone can reach this DSH through your NAS from anywhere.',
+  pinTitle: 'Access PIN',
+  pinDesc: '8 letters/digits; fixed once customized',
+  lanPinDesc: 'Separate PIN for the LAN entry',
+  lanSwitch: 'LAN entry',
+  lanAuthSwitch: 'LAN PIN',
+  lanOff: 'LAN entry is disabled',
+  nasStats: 'NAS live: {phone} device(s) online · pool idle {idle}',
   retryInfo: 'retry #{n} in ~{s}s',
-  nasStats: 'phone conns {phone} · pool idle {idle}',
-  pinLabel: 'Access PIN',
-  pinCustomHint: 'customized',
-  refresh: 'Refresh',
-  customize: 'Customize',
-  customizing: 'Set to',
-  resetFactory: 'Factory reset',
-  resetGo: 'Reset',
-  resetIntro: 'Clears plugin settings and resets PINs; DSH data is untouched',
+  adv: 'Advanced',
+  advAddress: 'LAN address',
+  auto: 'Auto',
+  reset: 'Factory reset',
+  resetDesc: 'Clears all plugin settings and resets PINs (DSH data untouched)',
   resetTitle: 'Factory reset?',
-  resetBody: 'Clears the server address, token, switches and custom PINs, and resets access PINs. Phones must sign in again.',
+  resetBody: 'Server address, token, switches and custom PINs will be cleared; phones must sign in again.',
   confirm: 'Confirm',
-  confirmRelay: 'Enable internet access?',
-  relayConfirmBody: 'Your NAS will expose this computer\'s DSH (which can execute code) to the internet. Make sure:\n1. dsh-relay-server is deployed on the NAS and no other port is exposed\n2. Keep the PIN / QR code private',
-  error: 'Error: {msg}',
-  unknown: 'unknown error',
+  cancel: 'Cancel',
+  copy: 'Copy',
+  errPrefix: 'Error: ',
 };
 
-// 简易样式（对齐 dsh 设计令牌，缺失时回退）
-const styles = {
-  card: { background: 'var(--dsw-alias-bg-layer-1,#fff)', border: '1px solid var(--dsw-alias-border-l2,#e5e7eb)', borderRadius: 12, padding: '16px 20px', maxWidth: 480 },
-  block: { borderTop: '1px solid var(--dsw-alias-border-l2,#e5e7eb)', marginTop: 14, paddingTop: 14 },
-  muted: { color: 'var(--dsw-alias-label-tertiary,#8b93a1)', fontSize: 12, lineHeight: 1.5 },
-  code: { fontFamily: 'ui-monospace,Menlo,monospace', fontSize: 12, wordBreak: 'break-all', margin: '6px 0' },
-  primary: { font: 'inherit', cursor: 'pointer', border: 'none', background: 'var(--dsw-alias-button-primary-fill,var(--dsw-alias-brand-primary,#4f6ef7))', color: '#fff', height: 32, padding: '0 14px', borderRadius: 999, fontSize: 13 },
-  btn: { font: 'inherit', cursor: 'pointer', border: '1px solid var(--dsw-alias-border-l2,#d1d5db)', background: 'var(--dsw-alias-bg-layer-1,#fff)', color: 'inherit', height: 32, padding: '0 14px', borderRadius: 999, fontSize: 13 },
+// ---------- 样式（原创布局：状态横幅 + 引导式配置 + 折叠次级区） ----------
+const S = {
+  wrap: { background: 'var(--dsw-alias-bg-layer-1,#fff)', border: '1px solid var(--dsw-alias-border-l2,#e5e7eb)', borderRadius: 14, overflow: 'hidden' },
+  banner: (color) => ({ display: 'flex', alignItems: 'center', gap: 10, padding: '14px 18px', background: color, color: '#fff' }),
+  dot: () => ({ width: 10, height: 10, borderRadius: '50%', background: '#fff', boxShadow: '0 0 0 3px rgba(255,255,255,.25)', flexShrink: 0 }),
+  body: { padding: '14px 18px 18px' },
+  sectionLabel: { fontSize: 11, fontWeight: 700, letterSpacing: 1, color: 'var(--dsw-alias-label-tertiary,#8b93a1)', textTransform: 'uppercase', margin: '18px 0 8px' },
+  card: { border: '1px solid var(--dsw-alias-border-l2,#e5e7eb)', borderRadius: 10, padding: '12px 14px' },
+  field: { fontSize: 12, color: 'var(--dsw-alias-label-secondary,#6b7280)' },
+  input: { font: 'inherit', display: 'block', width: '100%', boxSizing: 'border-box', padding: '8px 10px', fontSize: 13, border: '1px solid var(--dsw-alias-border-l2,#d1d5db)', borderRadius: 8, outline: 'none', marginTop: 4, background: 'var(--dsw-alias-bg-layer-1,#fff)', color: 'inherit' },
+  primary: { font: 'inherit', cursor: 'pointer', border: 'none', background: 'var(--dsw-alias-button-primary-fill,var(--dsw-alias-brand-primary,#4f6ef7))', color: '#fff', height: 34, padding: '0 18px', borderRadius: 8, fontSize: 13, fontWeight: 600 },
+  mini: { font: 'inherit', cursor: 'pointer', border: '1px solid var(--dsw-alias-border-l2,#d1d5db)', background: 'transparent', color: 'inherit', height: 24, padding: '0 8px', borderRadius: 6, fontSize: 11 },
   danger: { color: 'var(--dsw-alias-state-error-primary,#dc2626)' },
-  warn: { color: 'var(--dsw-alias-state-warn-primary,#b45309)', fontSize: 12, lineHeight: 1.5 },
-  qr: { width: 200, height: 200, borderRadius: 10, border: '1px solid var(--dsw-alias-border-l2,#e5e7eb)', margin: '8px 0' },
-  input: { font: 'inherit', padding: '5px 9px', fontSize: 13, border: '1px solid var(--dsw-alias-border-l2,#d1d5db)', borderRadius: 6, outline: 'none', margin: '4px 0 0 6px', width: 220 },
-  switchWrap: { flexShrink: 0, width: 40, height: 22, borderRadius: 11, border: 'none', padding: 0, position: 'relative', cursor: 'pointer', font: 'inherit' },
+  url: { font: '600 15px ui-monospace,Menlo,monospace', wordBreak: 'break-all', color: 'var(--dsw-alias-label-primary,inherit)' },
+  pin: { font: '16px ui-monospace,Menlo,monospace', letterSpacing: 3 },
+  muted: { color: 'var(--dsw-alias-label-tertiary,#8b93a1)', fontSize: 12, lineHeight: 1.5 },
+  qr: { width: 132, height: 132, borderRadius: 8, display: 'block' },
+  grid2: { display: 'grid', gridTemplateColumns: '132px 1fr', gap: 14, alignItems: 'start' },
+  warn: { color: 'var(--dsw-alias-state-warn-primary,#b45309)', fontSize: 12 },
+  err: { color: 'var(--dsw-alias-state-error-primary,#dc2626)', fontSize: 12 },
 };
+const STATE_COLORS = { ready: '#16a34a', connecting: '#d97706', reconnecting: '#d97706', error: '#dc2626', idle: '#6b7280' };
 
 function Switch(on, onClick) {
-  return h('button', { role: 'switch', 'aria-checked': !!on, style: { ...styles.switchWrap, background: on ? 'var(--dsw-alias-button-primary-fill,var(--dsw-alias-brand-primary,#4f6ef7))' : 'var(--dsw-alias-border-l2,#d1d5db)' }, onClick },
-    h('span', { style: { position: 'absolute', top: 2, left: on ? 20 : 2, width: 18, height: 18, borderRadius: '50%', background: '#fff' } }));
+  return h('button', { role: 'switch', 'aria-checked': !!on, onClick, style: { flexShrink: 0, width: 38, height: 20, borderRadius: 10, border: 'none', padding: 0, position: 'relative', cursor: 'pointer', font: 'inherit', background: on ? 'var(--dsw-alias-button-primary-fill,var(--dsw-alias-brand-primary,#4f6ef7))' : 'var(--dsw-alias-border-l2,#d1d5db)' } },
+    h('span', { style: { position: 'absolute', top: 2, left: on ? 19 : 2, width: 16, height: 16, borderRadius: '50%', background: '#fff' } }));
 }
 
 function RelaySettingsTab({ rpcCall, t }) {
-  const tf = (key, vars) => {
-    let s = t(key);
-    if (vars) for (const [k, v] of Object.entries(vars)) s = String(s).split(`{${k}}`).join(String(v));
-    return s;
-  };
-  const [status, setStatus] = useState(null);
+  const tf = (key, vars) => { let s = t(key); if (vars) for (const [k, v] of Object.entries(vars)) s = String(s).split(`{${k}}`).join(String(v)); return s; };
+  const [st, setSt] = useState(null);
   const [busy, setBusy] = useState(false);
+  const [cfgEdit, setCfgEdit] = useState(null);
+  const [pinEdit, setPinEdit] = useState(null);
+  const [dialog, setDialog] = useState(null);
   const [error, setError] = useState(null);
-  const [editing, setEditing] = useState(null); // { url, token }
-  const [resetOpen, setResetOpen] = useState(false);
-  const [confirmOpen, setConfirmOpen] = useState(false);
-  const [customPin, setCustomPin] = useState(null); // { which, value }
   const [toast, setToast] = useState(null);
-  const toastTimer = useRef(null);
-  const showToast = (text) => {
-    setToast(text);
-    clearTimeout(toastTimer.current);
-    toastTimer.current = setTimeout(() => setToast(null), 2200);
-  };
+  const toastT = useRef(null);
+  const showToast = (m) => { setToast(m); clearTimeout(toastT.current); toastT.current = setTimeout(() => setToast(null), 2000); };
 
-  const call = async (endpoint, payload) => {
-    const res = await rpcCall(endpoint, payload);
-    if (!res?.ok) throw new Error(res?.error?.message ?? 'RPC failed');
-    return res.value;
+  const call = async (ep, payload) => {
+    const r = await rpcCall(ep, payload);
+    if (!r?.ok) throw new Error(r?.error?.message ?? 'RPC failed');
+    return r.value;
   };
+  const poll = async () => { try { setSt(redactStatus(await call(RELAY_ENDPOINTS.status, {}))); } catch { /* 忽略 */ } };
+  useEffect(() => { poll(); const t2 = setInterval(poll, 3000); return () => clearInterval(t2); }, []);
 
-  const load = async () => {
-    try { setStatus(redactStatus(await call(RELAY_ENDPOINTS.status, {}))); } catch { /* 瞬时失败 */ }
-  };
-  useEffect(() => {
-    load();
-    const timer = setInterval(load, 3000);
-    return () => clearInterval(timer);
-  }, []);
+  const errText = (m) => { const s = String(m ?? ''); const i = s.indexOf(' | '); return i < 0 ? s : (t('localeTag') === 'en' ? s.slice(i + 3) : s.slice(0, i)).trim(); };
+  const apply = async (fn) => { setBusy(true); setError(null); try { setSt(redactStatus(await fn())); } catch (e) { setError(e.message); } finally { setBusy(false); } };
+  const copy = (text) => { try { navigator.clipboard.writeText(text); showToast('✓'); } catch { /* 忽略 */ } };
 
-  const errText = (msg) => {
-    const s = String(msg ?? '');
-    const i = s.indexOf(' | ');
-    const pick = i < 0 ? s : (t('localeTag') === 'en' ? s.slice(i + 3) : s.slice(0, i));
-    return pick.trim();
-  };
+  const phase = st?.relayState?.phase ?? 'idle';
+  const cfg = st?.relayConfig ?? { url: '', tokenSet: false };
+  const rs = st?.relayState ?? {};
+  const bannerText = phase === 'ready' ? t('stReady') : phase === 'reconnecting' ? t('stReconnecting') : phase === 'connecting' ? t('stConnecting') : phase === 'error' ? t('stError') : t('stIdle');
+  const bannerColor = STATE_COLORS[phase] ?? STATE_COLORS.idle;
+  const errOf = (m) => h('div', { style: S.err }, t('errPrefix') + errText(m));
 
-  const startRelay = async () => {
-    setBusy(true);
-    setError(null);
-    try { setStatus(redactStatus(await call(RELAY_ENDPOINTS.relayStart, { confirm: true }))); }
-    catch (err) { setError(err.message); }
-    finally { setBusy(false); }
-  };
-  const stopRelay = async () => {
-    try { setStatus(redactStatus(await call(RELAY_ENDPOINTS.relayStop, {}))); } catch { /* 忽略 */ }
-  };
-  const saveConfig = async () => {
+  const savePin = async (which) => { try { setSt(redactStatus(await call(RELAY_ENDPOINTS.pinSetCustom, { which, value: pinEdit?.value ?? '' }))); setPinEdit(null); } catch (e) { setPinEdit((c) => ({ ...c, err: e.message })); } };
+  const pinBlock = (which, value, custom, desc) => h('div', { style: { marginTop: 10 } },
+    h('div', { style: { display: 'flex', alignItems: 'baseline', justifyContent: 'space-between' } },
+      h('span', { style: { ...S.field, fontWeight: 600 } }, t('pinTitle')),
+      custom ? h('span', { style: S.muted }, '✓') : null),
+    h('div', { style: S.muted }, desc),
+    pinEdit?.which === which
+      ? h('div', { style: { display: 'flex', gap: 6, marginTop: 6, alignItems: 'center' } },
+        h('input', { style: { ...S.input, width: 120, marginTop: 0, textAlign: 'center', letterSpacing: 3, fontSize: 15 }, maxLength: 8, autoFocus: true, value: pinEdit.value ?? '',
+          onChange: (e) => setPinEdit((c) => ({ ...c, value: e.target.value.replace(/[^a-zA-Z0-9]/g, '') })),
+          onKeyDown: (e) => { if (e.key === 'Enter') savePin(which); if (e.key === 'Escape') setPinEdit(null); } }),
+        h('button', { style: S.mini, onClick: () => savePin(which) }, '✓'),
+        h('button', { style: S.mini, onClick: () => setPinEdit(null) }, '✕'),
+        pinEdit.err ? errOf(pinEdit.err) : null)
+      : h('div', { style: { display: 'flex', alignItems: 'center', gap: 8, marginTop: 6 } },
+        h('span', { style: S.pin }, value ?? '········'),
+        h('button', { style: S.mini, onClick: () => setPinEdit({ which, value: '' }) }, t('customize')),
+        which === 'lan' ? null : h('span', { style: S.muted }, t('pinDesc'))));
+
+  const saveCfg = async (andStart) => {
     try {
-      setStatus(redactStatus(await call(RELAY_ENDPOINTS.relaySetConfig, { url: editing?.url ?? '', token: editing?.token ?? '' })));
-      setEditing(null);
-      showToast(t('save') + ' ✓');
-    } catch (err) { setEditing((c) => ({ ...c, err: errText(err.message) })); }
-  };
-  const saveCustomPin = async (which) => {
-    try {
-      setStatus(redactStatus(await call(RELAY_ENDPOINTS.pinSetCustom, { which, value: customPin?.value ?? '' })));
-      setCustomPin(null);
-    } catch (err) { setCustomPin((c) => ({ ...c, err: errText(err.message) })); }
-  };
-  const doFactoryReset = async () => {
-    setResetOpen(false);
-    setBusy(true);
-    try { setStatus(redactStatus(await call(RELAY_ENDPOINTS.relayReset, { confirm: true }))); setEditing(null); setCustomPin(null); showToast('✓'); }
-    catch (err) { setError(err.message); }
-    finally { setBusy(false); }
+      setSt(redactStatus(await call(RELAY_ENDPOINTS.relaySetConfig, { url: cfgEdit?.url ?? '', token: cfgEdit?.token ?? '' })));
+      setCfgEdit(null);
+      if (andStart) setSt(redactStatus(await call(RELAY_ENDPOINTS.relayStart, { confirm: true })));
+    } catch (e) { setCfgEdit((c) => ({ ...c, err: e.message })); }
   };
 
-  const relayState = status?.relayState ?? { phase: 'idle' };
-  const cfg = status?.relayConfig ?? { url: '', tokenSet: false };
-  const row = (label, control, extra) => h('div', { style: { borderTop: '1px solid var(--dsw-alias-border-l2,#e5e7eb)', paddingTop: 9, marginTop: 9 } },
-    h('div', { style: { display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 8 } }, h('span', { style: { fontSize: 13 } }, label), control), extra ?? null);
-  const qrArea = (src, url, hint) => h('div', { style: { background: 'var(--dsw-alias-bg-layer-2,#f3f4f6)', borderRadius: 10, padding: '10px 12px', textAlign: 'center', margin: '10px 0' } },
-    src ? h('img', { src, alt: 'QR', style: styles.qr }) : null,
-    h('div', { style: styles.code }, url),
-    h('div', { style: styles.muted }, hint));
-  const pinRow = (which, label, value, custom) => row(label,
-    customPin?.which === which ? null : h('span', { style: { display: 'inline-flex', alignItems: 'center', gap: 8 } },
-      h('span', { style: { fontFamily: 'ui-monospace,Menlo,monospace', fontSize: 13, letterSpacing: 1 } }, value),
-      h('button', { style: { ...styles.btn, height: 26, padding: '0 10px', fontSize: 12 }, onClick: () => setCustomPin({ which, value: '', err: null }) }, t('customize'))),
-    customPin?.which === which
-      ? h('div', { style: { marginTop: 6, fontSize: 12, display: 'flex', alignItems: 'center', gap: 6, flexWrap: 'wrap' } },
-        t('customizing'),
-        h('input', { style: { ...styles.input, width: 110, margin: 0, textAlign: 'center', letterSpacing: 2 }, type: 'password', maxLength: 8, value: customPin.value ?? '', autoFocus: true,
-          onChange: (e) => setCustomPin((c) => ({ ...c, value: e.target.value.replace(/[^a-zA-Z0-9]/g, ''), err: null })),
-          onKeyDown: (e) => { if (e.key === 'Enter') saveCustomPin(which); if (e.key === 'Escape') setCustomPin(null); } }),
-        h('button', { style: { ...styles.btn, height: 26, padding: '0 10px', fontSize: 12 }, onClick: () => saveCustomPin(which) }, t('save')),
-        h('button', { style: { ...styles.btn, height: 26, padding: '0 10px', fontSize: 12 }, onClick: () => setCustomPin(null) }, t('cancel')),
-        customPin?.err ? h('span', { style: styles.danger }, customPin.err) : null)
-      : (custom ? h('div', { style: { ...styles.muted, marginTop: 4 } }, t('pinCustomHint')) : null));
+  const wanOn = st?.relayRunning === true;
+  const wanConfigured = Boolean(cfg.url);
+  const wanBlock = h('div', { style: S.card },
+    !wanOn && !wanConfigured
+      ? h('div', null,
+        h('div', { style: { fontWeight: 600, fontSize: 13, marginBottom: 8 } }, t('cfgTitle')),
+        h('div', { style: S.field }, t('cfgStep1')),
+        h('input', { style: S.input, placeholder: t('serverPlaceholder'), value: cfgEdit?.url ?? '', autoFocus: true,
+          onChange: (e) => setCfgEdit((c) => ({ ...c, url: e.target.value.trim() })) }),
+        h('div', { style: { ...S.field, marginTop: 10 } }, t('cfgStep2')),
+        h('input', { style: { ...S.input, fontFamily: 'ui-monospace,Menlo,monospace' }, type: 'password', placeholder: t('tokenPlaceholder'), value: cfgEdit?.token ?? '',
+          onChange: (e) => setCfgEdit((c) => ({ ...c, token: e.target.value.trim() })) }),
+        h('div', { style: { display: 'flex', gap: 8, marginTop: 12 } },
+          h('button', { style: S.primary, disabled: busy, onClick: () => saveCfg(true) }, busy ? t('opening') : t('cfgSave'))))
+      : h('div', null,
+        h('div', { style: { display: 'flex', alignItems: 'center', justifyContent: 'space-between', flexWrap: 'wrap', gap: 6 } },
+          h('div', null,
+            h('div', { style: { ...S.field, fontWeight: 600 } }, t('cfgCurrent')),
+            h('div', { style: S.url }, cfg.url || '—')),
+          h('button', { style: S.mini, onClick: () => setCfgEdit({ url: cfg.url ?? '', token: '', err: null }) }, t('cfgEdit'))),
+        cfgEdit
+          ? h('div', { style: { marginTop: 10, paddingTop: 10, borderTop: '1px solid var(--dsw-alias-border-l2,#e5e7eb)' } },
+            h('div', { style: S.field }, t('cfgStep1')),
+            h('input', { style: S.input, value: cfgEdit.url, autoFocus: true, onChange: (e) => setCfgEdit((c) => ({ ...c, url: e.target.value.trim() })) }),
+            h('div', { style: { ...S.field, marginTop: 8 } }, t('cfgStep2')),
+            h('input', { style: { ...S.input, fontFamily: 'ui-monospace,Menlo,monospace' }, type: 'password', placeholder: cfg.tokenSet ? '••••••••' : t('tokenPlaceholder'), value: cfgEdit.token, onChange: (e) => setCfgEdit((c) => ({ ...c, token: e.target.value.trim() })) }),
+            h('div', { style: { display: 'flex', gap: 8, marginTop: 10, alignItems: 'center' } },
+              h('button', { style: S.mini, onClick: () => saveCfg(false) }, t('cfgSaveOnly')),
+              h('button', { style: S.mini, onClick: () => setCfgEdit(null) }, t('cancel')),
+              cfgEdit.err ? errOf(cfgEdit.err) : null))
+          : null,
+        !wanOn ? h('div', { style: { marginTop: 12 } },
+          h('div', { style: S.muted }, t('wanOffHint')),
+          h('button', { style: { ...S.primary, marginTop: 8 }, disabled: busy, onClick: () => apply(() => call(RELAY_ENDPOINTS.relayStart, { confirm: true })) }, busy ? t('opening') : t('openRelay'))) : null,
+        wanOn && st?.relayUrl ? h('div', { style: { ...S.grid2, marginTop: 12 } },
+          h('img', { src: st.relayQr, alt: 'QR', style: S.qr }),
+          h('div', null,
+            h('div', { style: S.url }, st.relayUrl),
+            h('div', { style: { ...S.muted, margin: '4px 0 10px' } }, t('qrHintWan')),
+            h('button', { style: S.mini, onClick: () => copy(st.relayUrl) }, t('copy')),
+            rs.server?.phone !== undefined ? h('div', { style: { ...S.muted, marginTop: 10 } }, tf('nasStats', { phone: rs.server.phone, idle: rs.server.idle ?? '—' })) : null,
+            pinBlock('public', st.accessToken, st.publicPinCustom, t('pinDesc'))) : null));
 
-  return h('div', { style: styles.card },
-    h('div', null,
-      h('strong', null, t('title')),
-      h('div', { style: styles.muted }, t('subtitle'))),
+  const lanBlock = h('div', { style: S.card },
+    st?.lanEnabled === false
+      ? h('div', { style: { display: 'flex', alignItems: 'center', justifyContent: 'space-between' } },
+        h('span', { style: S.muted }, t('lanOff')), Switch(false, () => apply(() => call(RELAY_ENDPOINTS.lanSetEnabled, { on: true }))))
+      : h('div', null,
+        h('div', { style: { display: 'flex', alignItems: 'center', justifyContent: 'space-between' } },
+          h('span', { style: { ...S.field, fontWeight: 600 } }, t('lanSwitch')), Switch(true, () => apply(() => call(RELAY_ENDPOINTS.lanSetEnabled, { on: false })))),
+        st?.lanUrl ? h('div', { style: { ...S.grid2, marginTop: 10 } },
+          h('img', { src: st.lanQr, alt: 'QR', style: S.qr }),
+          h('div', null,
+            h('div', { style: { ...S.url, fontSize: 13 } }, st.lanUrl),
+            h('div', { style: { ...S.muted, margin: '4px 0 8px' } }, t('qrHintLan')),
+            h('div', { style: { display: 'flex', alignItems: 'center', gap: 8 } },
+              h('span', { style: { ...S.field, fontWeight: 600 } }, t('lanAuthSwitch')), Switch(st.lanAuthEnabled !== false, () => apply(() => call(RELAY_ENDPOINTS.lanAuthSetEnabled, { on: st?.lanAuthEnabled === false })))),
+            st.lanAuthEnabled !== false ? pinBlock('lan', st.lanToken, st.lanPinCustom, t('lanPinDesc')) : null))
+          : h('div', { style: S.muted }, '…')));
 
-    // 局域网
-    h('div', { style: styles.block },
-      h('div', { style: { display: 'flex', alignItems: 'center', justifyContent: 'space-between' } },
-        h('span', { style: { fontWeight: 600, fontSize: 13 } }, t('lanAccess')),
-        Switch(status?.lanEnabled !== false, async () => {
-          try { setStatus(redactStatus(await call(RELAY_ENDPOINTS.lanSetEnabled, { on: status?.lanEnabled === false }))); } catch (err) { setError(err.message); }
-        })),
-      status?.lanEnabled === false
-        ? h('div', { style: { ...styles.warn, marginTop: 8 } }, t('lanDisabledHint'))
-        : (status?.lanUrl
-          ? h('div', null,
-            qrArea(status.lanQr, status.lanUrl, 'http · 同一局域网'),
-            pinRow('lan', t('lanPin'), status.lanToken ?? '—', status.lanPinCustom),
-            row(t('lanAuthSwitch'), Switch(status?.lanAuthEnabled !== false, async () => {
-              try { setStatus(redactStatus(await call(RELAY_ENDPOINTS.lanAuthSetEnabled, { on: status?.lanAuthEnabled === false }))); } catch (err) { setError(err.message); }
-            })))
-          : h('div', { style: styles.muted }, t('lanStarting')))),
+  const advBlock = h('div', { style: S.card },
+    h('div', { style: { display: 'flex', alignItems: 'center', justifyContent: 'space-between', flexWrap: 'wrap', gap: 8 } },
+      h('span', { style: { ...S.field, fontWeight: 600 } }, t('advAddress')),
+      h('select', { value: st?.lanIpOverride ?? '', style: { ...S.input, width: 'auto', marginTop: 0 }, onChange: (e) => apply(() => call(RELAY_ENDPOINTS.lanSetOverride, { ip: e.target.value })) },
+        h('option', { value: '' }, t('auto')),
+        (st?.lanCandidates ?? []).map((ip) => h('option', { key: ip, value: ip }, ip)))),
+    h('div', { style: { display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginTop: 12, paddingTop: 10, borderTop: '1px solid var(--dsw-alias-border-l2,#e5e7eb)' } },
+      h('span', { style: { ...S.field, fontWeight: 600, ...S.danger } }, t('reset')),
+      h('button', { style: { ...S.mini, ...S.danger }, onClick: () => setDialog('reset') }, t('reset'))),
+    h('div', { style: S.muted }, t('resetDesc')));
 
-    // NAS 中继
-    h('div', { style: styles.block },
-      h('div', { style: { display: 'flex', alignItems: 'center', justifyContent: 'space-between' } },
-        h('span', { style: { fontWeight: 600, fontSize: 13 } }, t('wanAccess')),
-        status?.relayRunning
-          ? h('button', { style: { ...styles.btn, ...styles.danger, height: 28, padding: '0 12px', fontSize: 12 }, onClick: stopRelay }, t('stopRelay'))
-          : h('button', { style: { ...styles.primary, height: 28, padding: '0 14px', fontSize: 12 }, disabled: busy, onClick: () => setConfirmOpen(true) }, busy ? t('opening') : t('enable'))),
-
-      relayState.phase === 'reconnecting'
-        ? h('div', { style: { marginTop: 8, fontSize: 12, color: '#b45309' } },
-          t('stateReconnecting'),
-          relayState.attempts ? h('div', { style: styles.muted }, tf('retryInfo', { n: relayState.attempts, s: relayState.nextRetryAt ? Math.max(0, Math.ceil((relayState.nextRetryAt - Date.now()) / 1000)) : '—' })) : null)
-        : relayState.phase === 'connecting' ? h('div', { style: { marginTop: 8, fontSize: 12, color: '#6b7280' } }, t('stateConnecting'))
-        : relayState.phase === 'error' ? h('div', { style: { marginTop: 8, fontSize: 12, ...styles.danger } }, t('error', { msg: errText(relayState.detail) || t('unknown') }))
-        : null,
-
-      status?.relayRunning
-        ? h('div', null,
-          qrArea(status.relayQr, status.relayUrl, 'https · 任意网络'),
-          relayState.server?.phone !== undefined
-            ? h('div', { style: styles.muted }, tf('nasStats', { phone: relayState.server.phone, idle: relayState.server.idle ?? '—' }))
-            : null,
-          pinRow('public', t('pinLabel'), status.accessToken ?? '—', status.publicPinCustom))
-        : h('div', { style: { marginTop: 8, ...styles.muted } }, t('stateIdle')),
-
-      // 服务端配置（地址 + token）
-      row(`${t('serverLabel')} / ${t('tokenLabel')}`,
-        editing ? null : h('span', { style: { display: 'inline-flex', alignItems: 'center', gap: 8 } },
-          h('span', { style: { fontSize: 12, fontFamily: 'ui-monospace,Menlo,monospace' } }, cfg.url || '—'),
-          h('button', { style: { ...styles.btn, height: 26, padding: '0 10px', fontSize: 12 }, onClick: () => setEditing({ url: cfg.url ?? '', token: '', err: null }) }, t('edit'))),
-        editing
-          ? h('div', { style: { marginTop: 6 } },
-            h('div', null, t('serverLabel'),
-              h('input', { style: styles.input, placeholder: t('serverPlaceholder'), value: editing.url, autoFocus: true,
-                onChange: (e) => setEditing((c) => ({ ...c, url: e.target.value.trim(), err: null })),
-                onKeyDown: (e) => { if (e.key === 'Escape') setEditing(null); } })),
-            h('div', { style: { marginTop: 6 } }, t('tokenLabel'),
-              h('input', { style: { ...styles.input, fontFamily: 'ui-monospace,Menlo,monospace' }, type: 'password', placeholder: editing?.token === null && cfg.tokenSet ? '••••••' : t('tokenPlaceholder'), value: editing.token,
-                onChange: (e) => setEditing((c) => ({ ...c, token: e.target.value.trim(), err: null })),
-                onKeyDown: (e) => { if (e.key === 'Enter') saveConfig(); if (e.key === 'Escape') setEditing(null); } })),
-            h('div', { style: { marginTop: 8, display: 'flex', gap: 8 } },
-              h('button', { style: { ...styles.btn, height: 26, padding: '0 12px', fontSize: 12 }, onClick: saveConfig }, t('save')),
-              h('button', { style: { ...styles.btn, height: 26, padding: '0 12px', fontSize: 12 }, onClick: () => setEditing(null) }, t('cancel'))),
-            editing.err ? h('div', { style: { ...styles.danger, marginTop: 4, fontSize: 12 } }, editing.err) : null)
-          : h('div', { style: { ...styles.muted, marginTop: 4 } }, cfg.tokenSet ? 'Token ✓' : t('needCfg')))),
-
-    error ? h('div', { style: { ...styles.danger, fontSize: 12, marginTop: 8 } }, `❌ ${errText(error)}`) : null,
-
-    // 恢复出厂
-    h('div', { style: styles.block },
-      h('div', { style: { display: 'flex', alignItems: 'center', justifyContent: 'space-between' } },
-        h('span', { style: { fontWeight: 600, fontSize: 13 } }, t('resetFactory')),
-        h('button', { style: { ...styles.btn, height: 28, padding: '0 12px', fontSize: 12, ...styles.danger }, onClick: () => setResetOpen(true) }, t('resetGo'))),
-      h('div', { style: { ...styles.muted, marginTop: 6 } }, t('resetIntro'))),
-
-    // 确认弹框：开启外网
-    confirmOpen ? h('div', { style: dialogMask() }, h('div', { style: dialogCard() },
-      h('div', { style: { fontWeight: 600, fontSize: 15, marginBottom: 10, color: '#b45309' } }, t('confirmRelay')),
-      h('div', { style: { fontSize: 13, lineHeight: 1.7, whiteSpace: 'pre-line' } }, t('relayConfirmBody')),
-      h('div', { style: { display: 'flex', gap: 8, marginTop: 16 } },
-        h('button', { style: { ...styles.btn, flex: 1 }, onClick: () => setConfirmOpen(false) }, t('cancel')),
-        h('button', { style: { ...styles.primary, flex: 1 }, onClick: () => { setConfirmOpen(false); startRelay(); } }, t('confirm'))))) : null,
-
-    // 确认弹框：恢复出厂
-    resetOpen ? h('div', { style: dialogMask() }, h('div', { style: dialogCard() },
-      h('div', { style: { fontWeight: 600, fontSize: 15, marginBottom: 10, color: '#b45309' } }, t('resetTitle')),
-      h('div', { style: { fontSize: 13, lineHeight: 1.7 } }, t('resetBody')),
-      h('div', { style: { display: 'flex', gap: 8, marginTop: 16 } },
-        h('button', { style: { ...styles.btn, flex: 1 }, onClick: () => setResetOpen(false) }, t('cancel')),
-        h('button', { style: { ...styles.primary, flex: 1, background: 'var(--dsw-alias-state-error-primary,#dc2626)' }, onClick: doFactoryReset }, t('confirm'))))) : null,
-
-    toast ? h('div', { style: { position: 'fixed', left: '50%', top: '50%', transform: 'translate(-50%,-50%)', zIndex: 10001, background: 'rgba(17,24,39,.92)', color: '#fff', borderRadius: 10, padding: '10px 16px', fontSize: 13 } }, toast) : null,
-  );
-}
-
-function dialogMask() {
-  return { position: 'fixed', inset: 0, zIndex: 10000, background: 'rgba(0,0,0,.5)', display: 'flex', alignItems: 'center', justifyContent: 'center', padding: 20 };
-}
-function dialogCard() {
-  return { background: 'var(--dsw-alias-bg-layer-1,#fff)', borderRadius: 12, maxWidth: 420, width: '100%', padding: '20px 22px', boxShadow: '0 8px 32px rgba(0,0,0,.18)' };
+  return h('div', { style: S.wrap },
+    h('div', { style: S.banner(bannerColor) },
+      h('span', { style: S.dot() }),
+      h('div', { style: { flex: 1 } },
+        h('div', { style: { fontWeight: 700, fontSize: 15 } }, t('appTitle')),
+        h('div', { style: { fontSize: 12, opacity: .9 } }, bannerText)),
+      wanOn
+        ? h('button', { style: { ...S.mini, borderColor: 'rgba(255,255,255,.5)', color: '#fff', height: 28, fontSize: 12 }, onClick: () => apply(() => call(RELAY_ENDPOINTS.relayStop, {})) }, t('stopRelay'))
+        : null),
+    h('div', { style: S.body },
+      h('div', { style: { ...S.muted, marginTop: -6, marginBottom: 4 } }, t('appSub')),
+      phase === 'reconnecting' && rs.attempts ? h('div', { style: { ...S.warn, marginBottom: 6 } }, tf('retryInfo', { n: rs.attempts, s: rs.nextRetryAt ? Math.max(0, Math.ceil((rs.nextRetryAt - Date.now()) / 1000)) : '—' })) : null,
+      error ? h('div', { style: { ...S.err, marginBottom: 6 } }, t('errPrefix') + errText(error)) : null,
+      h('div', { style: S.sectionLabel }, t('secWan')), wanBlock,
+      h('div', { style: S.sectionLabel }, t('secLan')), lanBlock,
+      h('div', { style: S.sectionLabel }, t('adv')), advBlock),
+    dialog === 'reset' ? h('div', { style: { position: 'fixed', inset: 0, zIndex: 10000, background: 'rgba(0,0,0,.5)', display: 'flex', alignItems: 'center', justifyContent: 'center', padding: 20 } },
+      h('div', { style: { background: 'var(--dsw-alias-bg-layer-1,#fff)', borderRadius: 12, maxWidth: 400, width: '100%', padding: '20px 22px' } },
+        h('div', { style: { fontWeight: 700, fontSize: 15, marginBottom: 8 } }, t('resetTitle')),
+        h('div', { style: { fontSize: 13, lineHeight: 1.6, color: 'var(--dsw-alias-label-secondary,#6b7280)' } }, t('resetBody')),
+        h('div', { style: { display: 'flex', gap: 8, marginTop: 16 } },
+          h('button', { style: { ...S.mini, flex: 1, height: 34, fontSize: 13 }, onClick: () => setDialog(null) }, t('cancel')),
+          h('button', { style: { ...S.primary, flex: 1, background: 'var(--dsw-alias-state-error-primary,#dc2626)' }, onClick: async () => { setDialog(null); try { setSt(redactStatus(await call(RELAY_ENDPOINTS.relayReset, { confirm: true }))); setCfgEdit(null); showToast('✓'); } catch (e) { setError(e.message); } } }, t('confirm'))))) : null,
+    toast ? h('div', { style: { position: 'fixed', left: '50%', top: '50%', transform: 'translate(-50%,-50%)', zIndex: 10001, background: 'rgba(17,24,39,.92)', color: '#fff', borderRadius: 8, padding: '8px 14px', fontSize: 13 } }, toast) : null);
 }
 
 export function apply(ctx) {
@@ -322,10 +289,7 @@ export function apply(ctx) {
     try { Object.defineProperty(ctx.connection, 'isLoopback', { value: true, writable: true, configurable: true }); }
     catch { try { ctx.connection.isLoopback = true; } catch { /* 忽略 */ } }
   }
-
   const rpcCall = (endpoint, payload, signal) => ctx.connection.rpc.call(RELAY_RPC_CHANNEL, endpoint, payload, signal);
-
-  // 注册双语词典并取 t()；locale 服务不可用时回退中文
   let t = (key) => zh[key] ?? key;
   try {
     if (typeof ctx.locale?.register === 'function' && typeof ctx.locale?.bind === 'function') {
@@ -335,10 +299,9 @@ export function apply(ctx) {
       if (typeof bound === 'function') t = bound;
     }
   } catch { /* 回退中文 */ }
-
   ctx.slots.inject('settings.section', () =>
     ctx.slots.register(
-      { name: 'settings.section', id: 'dsh-relay', order: 2, label: () => t('section'), inject: () => ({ rpcCall, t }) },
+      { name: 'settings.section', id: 'dsh-relay', order: 2, label: () => t('appTitle'), inject: () => ({ rpcCall, t }) },
       RelaySettingsTab,
     ));
 }
