@@ -103,6 +103,9 @@ var zh = {
   pinTitle: "\u8BBF\u95EE\u5BC6\u7801",
   pinDesc: "8 \u4F4D\u5B57\u6BCD/\u6570\u5B57\uFF1B\u81EA\u5B9A\u4E49\u540E\u4E0D\u518D\u8F6E\u6362",
   lanPinDesc: "\u5C40\u57DF\u7F51\u5165\u53E3\u7684\u72EC\u7ACB\u5BC6\u7801",
+  customize: "\u81EA\u5B9A\u4E49",
+  reveal: "\u663E\u793A",
+  hide: "\u9690\u85CF",
   lanSwitch: "\u5C40\u57DF\u7F51\u5165\u53E3",
   lanAuthSwitch: "\u5C40\u57DF\u7F51\u5BC6\u7801",
   lanOff: "\u5C40\u57DF\u7F51\u5165\u53E3\u5DF2\u5173\u95ED",
@@ -157,6 +160,9 @@ var en = {
   pinTitle: "Access PIN",
   pinDesc: "8 letters/digits; fixed once customized",
   lanPinDesc: "Separate PIN for the LAN entry",
+  customize: "Customize",
+  reveal: "Show",
+  hide: "Hide",
   lanSwitch: "LAN entry",
   lanAuthSwitch: "LAN PIN",
   lanOff: "LAN entry is disabled",
@@ -282,6 +288,7 @@ function RelaySettingsTab({ rpcCall, t }) {
       setPinEdit((c) => ({ ...c, err: e.message }));
     }
   };
+  const [pinReveal, setPinReveal] = (0, import_react.useState)({});
   const pinBlock = (which, value, custom, desc) => (0, import_react.createElement)(
     "div",
     { style: { marginTop: 10 } },
@@ -312,7 +319,16 @@ function RelaySettingsTab({ rpcCall, t }) {
     ) : (0, import_react.createElement)(
       "div",
       { style: { display: "flex", alignItems: "center", gap: 8, marginTop: 6 } },
-      (0, import_react.createElement)("span", { style: S.pin }, value ?? "\xB7\xB7\xB7\xB7\xB7\xB7\xB7\xB7"),
+      (0, import_react.createElement)(
+        "span",
+        { style: { ...S.pin, fontFamily: pinReveal[which] ? S.pin.fontFamily : "inherit", letterSpacing: pinReveal[which] ? S.pin.letterSpacing : 2 } },
+        pinReveal[which] ? value ?? "\xB7\xB7\xB7\xB7\xB7\xB7\xB7\xB7" : "\xB7\xB7\xB7\xB7\xB7\xB7\xB7\xB7"
+      ),
+      (0, import_react.createElement)(
+        "button",
+        { style: S.mini, onClick: () => setPinReveal((c) => ({ ...c, [which]: !c[which] })) },
+        pinReveal[which] ? t("hide") : t("reveal")
+      ),
       (0, import_react.createElement)("button", { style: S.mini, onClick: () => setPinEdit({ which, value: "" }) }, t("customize")),
       which === "lan" ? null : (0, import_react.createElement)("span", { style: S.muted }, t("pinDesc"))
     )

@@ -36,6 +36,9 @@ const zh = {
   pinTitle: '访问密码',
   pinDesc: '8 位字母/数字；自定义后不再轮换',
   lanPinDesc: '局域网入口的独立密码',
+  customize: '自定义',
+  reveal: '显示',
+  hide: '隐藏',
   lanSwitch: '局域网入口',
   lanAuthSwitch: '局域网密码',
   lanOff: '局域网入口已关闭',
@@ -91,6 +94,9 @@ const en = {
   pinTitle: 'Access PIN',
   pinDesc: '8 letters/digits; fixed once customized',
   lanPinDesc: 'Separate PIN for the LAN entry',
+  customize: 'Customize',
+  reveal: 'Show',
+  hide: 'Hide',
   lanSwitch: 'LAN entry',
   lanAuthSwitch: 'LAN PIN',
   lanOff: 'LAN entry is disabled',
@@ -177,6 +183,8 @@ function RelaySettingsTab({ rpcCall, t }) {
   const errOf = (m) => h('div', { style: S.err }, t('errPrefix') + errText(m));
 
   const savePin = async (which) => { try { setSt(redactStatus(await call(RELAY_ENDPOINTS.pinSetCustom, { which, value: pinEdit?.value ?? '' }))); setPinEdit(null); } catch (e) { setPinEdit((c) => ({ ...c, err: e.message })); } };
+  // 密码默认掩码显示，点「显示」才可见（防止旁人屏幕偷窥/截图泄露）
+  const [pinReveal, setPinReveal] = useState({});
   const pinBlock = (which, value, custom, desc) => h('div', { style: { marginTop: 10 } },
     h('div', { style: { display: 'flex', alignItems: 'baseline', justifyContent: 'space-between' } },
       h('span', { style: { ...S.field, fontWeight: 600 } }, t('pinTitle')),
@@ -191,7 +199,10 @@ function RelaySettingsTab({ rpcCall, t }) {
         h('button', { style: S.mini, onClick: () => setPinEdit(null) }, '✕'),
         pinEdit.err ? errOf(pinEdit.err) : null)
       : h('div', { style: { display: 'flex', alignItems: 'center', gap: 8, marginTop: 6 } },
-        h('span', { style: S.pin }, value ?? '········'),
+        h('span', { style: { ...S.pin, fontFamily: pinReveal[which] ? S.pin.fontFamily : 'inherit', letterSpacing: pinReveal[which] ? S.pin.letterSpacing : 2 } },
+          pinReveal[which] ? (value ?? '········') : '········'),
+        h('button', { style: S.mini, onClick: () => setPinReveal((c) => ({ ...c, [which]: !c[which] })) },
+          pinReveal[which] ? t('hide') : t('reveal')),
         h('button', { style: S.mini, onClick: () => setPinEdit({ which, value: '' }) }, t('customize')),
         which === 'lan' ? null : h('span', { style: S.muted }, t('pinDesc'))));
 
