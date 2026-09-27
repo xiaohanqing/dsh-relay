@@ -458,11 +458,12 @@ if (process.argv[1] && import.meta.url === (await import('node:url')).pathToFile
   } else {
     const relay = createRelayServer();
     relay.listen().then((addr) => {
-      log(`dsh-relay-server ${PKG_VERSION} listening on ${JSON.stringify(addr)} (${relay.insecure ? 'INSECURE dev mode — set RELAY_TLS_CERT/RELAY_TLS_KEY' : 'TLS'})`);
+      const ts = () => new Date().toISOString();
+      console.log(ts(), `dsh-relay-server ${PKG_VERSION} listening on ${JSON.stringify(addr)} (${relay.insecure ? 'INSECURE dev mode — set RELAY_TLS_CERT/RELAY_TLS_KEY' : 'TLS'})`);
       for (const c of relay.clients) {
-        log(`  client ${c.id} domain=${c.domain || '(default 裸IP)'} token=${c.tokenHint}`);
+        console.log(ts(), `  client ${c.id} domain=${c.domain || '(default 裸IP)'} token=${c.tokenHint}`);
       }
-      log(`plugin connect: ${relay.insecure ? 'ws' : 'wss'}://<host>:${addr.port}/__relay/ctl`);
+      console.log(ts(), `plugin connect: ${relay.insecure ? 'ws' : 'wss'}://<host>:${addr.port}/__relay/ctl`);
     }).catch((err) => {
       console.error('failed to listen:', err.message);
       process.exit(1);

@@ -2,6 +2,8 @@
 import { test, describe, before, after } from 'node:test';
 import assert from 'node:assert/strict';
 import net from 'node:net';
+import { spawn } from 'node:child_process';
+import { fileURLToPath } from 'node:url';
 import { WebSocket, WebSocketServer } from 'ws';
 
 const { createRelayServer, normalizeClients } = await import('../src/server.mjs');
@@ -170,5 +172,38 @@ describe('多客户端路由', () => {
       `GET / HTTP/1.1\r\nHost: 192.168.31.70\r\nConnection: close\r\n\r\n`, { timeoutMs: 8000 });
     // 默认客户端(default)没有空闲池 → 503 而不是 421，说明路由到了默认客户端
     assert.ok(res.includes('503'), res);
+  });
+});
+
+describe('CLI 启动路径', () => {
+  test('node src/server.mjs 能起来并响应 status（防启动块回归）', async () => {
+    const port = 13720;
+    const child = spawn(process.execPath, ['src/server.mjs'], {
+      cwd: fileURLToPath(new URL('..', import.meta.url)),
+      env: { ...process.env, RELAY_TOKEN: 'cli-boot-token-0123456789abcdef', RELAY_PORT: String(port), RELAY_HOST: '127.0.0.1' },
+      stdio: ['ignore', 'pipe', 'pipe'],
+    });
+    let output = '';
+    child.stdout.on('data', (d) => { output += d; });
+    child.stderr.on('data', (d) => { output += d; });
+    try {
+      const deadline = Date.now() + 8000;
+      let ok = false;
+      while (Date.now() < deadline) {
+        ok = await new Promise((resolve) => {
+          const s = net.connect(port, '127.0.0.1');
+          let buf = Buffer.alloc(0);
+          s.on('data', (d) => { buf = Buffer.concat([buf, d]); s.destroy(); resolve(buf.toString('latin1').includes('"ok":true')); });
+          s.on('error', () => resolve(false));
+          s.on('connect', () => s.write('GET /__relay/status HTTP/1.1\r\nHost: x\r\nConnection: close\r\n\r\n'));
+        });
+        if (ok) break;
+        await waitMs(200);
+      }
+      assert.ok(ok, `CLI 启动失败: ${output}`);
+      assert.ok(output.includes('client default'), output);
+    } finally {
+      child.kill('SIGTERM');
+    }
   });
 });
