@@ -268,12 +268,21 @@ export function createRelayServer(overrides = {}) {
     return null;
   }
 
+  // 短响应（status/503/421）：写完即收尾。必须兜住 error——
+  // 客户端 abrupt close（RST）会让 end 后的 socket 冒出无监听的 ECONNRESET，直接打崩进程
+  function replyRaw(socket, text) {
+    socket.on('error', () => { try { socket.destroy(); } catch { /* 忽略 */ } });
+    socket.end(text, () => { try { socket.destroy(); } catch { /* 忽略 */ } });
+  }
+
   /** 手机流量入口：原始字节流整体透传（head 为嗅探期间缓存的首包）。 */
   async function pipePhoneSocket(socket, head, s) {
+    // 嗅探结束到绑定完成之间存在无监听窗口，先兜住 error 防进程崩溃
+    socket.on('error', () => { try { socket.destroy(); } catch { /* 忽略 */ } });
     const connId = ++s.connIdSeq;
     const ws = await bindDataConn(s);
     if (!ws || ws.readyState !== WebSocket.OPEN) {
-      socket.end('HTTP/1.1 503 Service Unavailable\r\nConnection: close\r\n\r\nNo tunnel available\r\n');
+      replyRaw(socket, 'HTTP/1.1 503 Service Unavailable\r\nConnection: close\r\n\r\nNo tunnel available\r\n');
       return;
     }
     s.phoneConns.set(connId, { ws, peer: socket });
@@ -333,12 +342,12 @@ export function createRelayServer(overrides = {}) {
         up.on('close', teardown);
       } else if (route === 'status') {
         const body = JSON.stringify({ ok: true, server: `dsh-relay-server/${PKG_VERSION}`, ...stats() });
-        socket.end(`HTTP/1.1 200 OK\r\ncontent-type: application/json\r\ncontent-length: ${Buffer.byteLength(body)}\r\nconnection: close\r\n\r\n${body}`);
+        replyRaw(socket, `HTTP/1.1 200 OK\r\ncontent-type: application/json\r\ncontent-length: ${Buffer.byteLength(body)}\r\nconnection: close\r\n\r\n${body}`);
       } else {
         // 手机流量：按 Host 路由到对应客户端
         const s = resolveByHost(host);
         if (!s) {
-          socket.end('HTTP/1.1 421 Misdirected Request\r\nConnection: close\r\n\r\nUnknown relay host\r\n');
+          replyRaw(socket, 'HTTP/1.1 421 Misdirected Request\r\nConnection: close\r\n\r\nUnknown relay host\r\n');
           return;
         }
         void pipePhoneSocket(socket, buf, s);

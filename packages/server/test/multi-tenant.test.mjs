@@ -175,6 +175,42 @@ describe('多客户端路由', () => {
   });
 });
 
+describe('abrupt close 健壮性（防未处理 ECONNRESET 打崩进程）', () => {
+  /** 连上 → 写请求 → 读完响应 → RST。服务端若未兜 error 会被 ECONNRESET 打崩。 */
+  function rstProbe(bytes) {
+    return new Promise((resolve) => {
+      const s = net.connect(PORT_M, '127.0.0.1');
+      let buf = Buffer.alloc(0);
+      s.on('data', (d) => {
+        buf = Buffer.concat([buf, d]);
+        if (buf.toString('latin1').includes('\r\n\r\n')) {
+          // 已收到响应头：此刻服务端已 end()，突然 RST
+          if (typeof s.resetAndDestroy === 'function') s.resetAndDestroy();
+          else s.destroy();
+        }
+      });
+      s.on('connect', () => s.write(bytes));
+      s.on('error', () => resolve(true)); // 本端收到 RST 属预期
+      s.on('close', () => resolve(true));
+    });
+  }
+
+  test('status / 503 / 421 三条短响应路径被 RST 都不崩', async () => {
+    await rstProbe('GET /__relay/status HTTP/1.1\r\nHost: x\r\n\r\n');
+    await rstProbe('GET / HTTP/1.1\r\nHost: alpha.test\r\n\r\n');      // 手机路径 → 503/透传
+    await rstProbe('GET / HTTP/1.1\r\nHost: nosuch.test\r\n\r\n');
+    await waitMs(300);
+    const st = await new Promise((resolve) => {
+      const s = net.connect(PORT_M, '127.0.0.1');
+      let buf = Buffer.alloc(0);
+      s.on('data', (d) => { buf = Buffer.concat([buf, d]); s.destroy(); resolve(buf.toString('latin1')); });
+      s.on('error', () => resolve(''));
+      s.on('connect', () => s.write('GET /__relay/status HTTP/1.1\r\nHost: x\r\nConnection: close\r\n\r\n'));
+    });
+    assert.ok(st.includes('"ok":true'), 'RST 后服务端必须仍然存活: ' + st);
+  });
+});
+
 describe('CLI 启动路径', () => {
   test('node src/server.mjs 能起来并响应 status（防启动块回归）', async () => {
     const port = 13720;
