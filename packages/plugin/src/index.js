@@ -1,8 +1,8 @@
-// dsh-relay 插件入口：手机/外网经你自己的 NAS 访问 DSH
+// dsh-relay 插件入口：手机/外网经你自己的中继服务端访问 DSH
 //
 // 设置一级入口「DSH Relay」：
 //   - 局域网二维码（代理随插件启动，开箱即用）
-//   - NAS 中继（填服务端地址 + token → 手机任意网络可访问，断线自动重连）
+//   - 中继服务端（填服务端地址 + 密钥串 → 手机任意网络可访问，断线自动重连）
 //
 // 访问密码：8 位 PIN，公网/局域网分开，存 $DSH_HOME/dsh-relay/（0600）。
 
@@ -100,7 +100,7 @@ export function apply(ctx, config = {}, internals = {}) {
       try { return JSON.parse(readFileSync(new URL('../package.json', import.meta.url), 'utf8')).version; } catch { return ''; }
     })(),
     onRelayReady: () => {
-      logger.info('dsh-relay: relay ready | NAS 中继已就绪');
+      logger.info('dsh-relay: relay ready | 中继已就绪');
     },
     // dsh web 浏览器会话启动 token：新版 dsh 要求根路径带一次 ?token= 换会话 cookie。
     // token 每次进程启动都变，必须实时从 connection 服务取（方法形式调用，勿丢 this）。

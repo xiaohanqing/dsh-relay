@@ -258,11 +258,11 @@ export function createRelayService({
       throw lastErr ?? new Error('proxy start failed');
     },
 
-    /** 开启 NAS 中继（幂等）。 */
+    /** 开启中继（幂等）。 */
     async startRelay() {
       const cfg = getRelayConfig();
       if (!cfg.url || !cfg.token) {
-        throw new Error('请先在设置里填写 NAS 服务端地址和 token | set the relay server address and token first');
+        throw new Error('请先在设置里填写服务端地址和密钥串 | set the relay server address and secret first');
       }
       const p = await this.startProxy();
       if (client?.running) return publicUrlFromServer(cfg.url);
@@ -294,7 +294,7 @@ export function createRelayService({
       if (!keepMarker) clearAutoMarker();
     },
 
-    /** 客户端主动申请接入 NAS（准入审批流）。 */
+    /** 客户端主动申请接入服务端（准入审批流）。 */
     async enroll(serverUrl, code = '') {
       return enrollStart(serverUrl, code);
     },
@@ -312,7 +312,7 @@ export function createRelayService({
       if (!cfg.url || !cfg.token) return false;
       try {
         await this.startRelay();
-        logInfo('dsh-relay: relay auto-restored | 已自动恢复 NAS 中继');
+        logInfo('dsh-relay: relay auto-restored | 已自动恢复中继');
         return true;
       } catch (err) {
         logWarn(`dsh-relay: relay auto-restore failed | 自动恢复失败: ${err?.message ?? err}`);

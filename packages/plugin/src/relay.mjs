@@ -1,4 +1,4 @@
-// dsh-relay 隧道客户端：插件主动外连 NAS，维持控制连接 + 数据连接池
+// dsh-relay 隧道客户端：插件主动外连中继服务端，维持控制连接 + 数据连接池
 // 协议见 docs/protocol.md。
 
 import WebSocket from 'ws';
@@ -126,7 +126,7 @@ export class RelayClient {
     this.dataInflight = 0;
     this.startedAt = Date.now();
     this.phase = 'connecting';
-    this._emit({ phase: 'connecting', detail: '连接 NAS 中继… | connecting to relay…', attempts: 0, nextRetryAt: null });
+    this._emit({ phase: 'connecting', detail: '连接中继服务端… | connecting to relay…', attempts: 0, nextRetryAt: null });
     this._connectCtl();
     for (let i = 0; i < POOL_SIZE; i++) this._connectData();
   }
