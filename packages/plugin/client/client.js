@@ -72,110 +72,123 @@ function redactStatus(s) {
 var name = "dsh-relay";
 var inject = ["connection", "slots", "locale"];
 var zh = {
-  section: "DSH Relay",
   localeTag: "zh",
-  title: "\u624B\u673A\u8BBF\u95EE\uFF08\u81EA\u5EFA\u4E2D\u7EE7\uFF09",
-  subtitle: "\u5C40\u57DF\u7F51\u626B\u7801\u76F4\u8FDE\uFF1B\u5916\u7F51\u7ECF\u4F60\u81EA\u5DF1\u7684 NAS \u4E2D\u7EE7\uFF0C\u4E0D\u4F9D\u8D56\u7B2C\u4E09\u65B9\u4E91",
-  lanAccess: "\u5C40\u57DF\u7F51\u8BBF\u95EE",
-  lanPin: "\u5C40\u57DF\u7F51\u5BC6\u7801",
-  lanAuthSwitch: "\u5BC6\u7801\u4FDD\u62A4",
-  lanDisabledHint: "\u5C40\u57DF\u7F51\u8BBF\u95EE\u5DF2\u5173\u95ED\uFF0C\u626B\u7801/\u94FE\u63A5\u4E0D\u53EF\u7528",
-  lanStarting: "\u6B63\u5728\u83B7\u53D6\u5C40\u57DF\u7F51\u5730\u5740\u2026",
-  wanAccess: "NAS \u4E2D\u7EE7\uFF08\u5916\u7F51\u8BBF\u95EE\uFF09",
-  enable: "\u5F00\u542F",
-  opening: "\u5F00\u542F\u4E2D\u2026",
-  stopRelay: "\u5173\u95ED",
-  serverLabel: "\u670D\u52A1\u7AEF\u5730\u5740",
-  tokenLabel: "Token",
-  serverPlaceholder: "nas.example.com \u6216 nas.example.com:8443",
-  tokenPlaceholder: "NAS \u4E0A RELAY_TOKEN \u7684\u503C",
-  save: "\u4FDD\u5B58",
-  cancel: "\u53D6\u6D88",
-  edit: "\u4FEE\u6539",
-  needCfg: "\u8BF7\u5148\u586B\u5199\u670D\u52A1\u7AEF\u5730\u5740\u548C Token",
-  stateReady: "\u5DF2\u8FDE\u63A5 NAS\uFF0C\u5916\u7F51\u53EF\u8BBF\u95EE",
-  stateReconnecting: "\u8FDE\u63A5\u65AD\u5F00\uFF0C\u6B63\u5728\u91CD\u8FDE\u2026",
-  stateConnecting: "\u6B63\u5728\u8FDE\u63A5 NAS\u2026",
-  stateIdle: "\u672A\u5F00\u542F",
-  retryInfo: "\u7B2C {n} \u6B21\u91CD\u8BD5 \xB7 \u7EA6 {s} \u79D2\u540E",
-  nasStats: "\u624B\u673A\u8FDE\u63A5\u6570 {phone} \xB7 \u6C60\u7A7A\u95F2 {idle}",
-  pinLabel: "\u8BBF\u95EE\u5BC6\u7801",
-  pinCustomHint: "\u5DF2\u81EA\u5B9A\u4E49",
-  refresh: "\u5237\u65B0",
-  customize: "\u81EA\u5B9A\u4E49",
-  customizing: "\u8BBE\u7F6E\u4E3A",
-  resetFactory: "\u6062\u590D\u51FA\u5382\u8BBE\u7F6E",
-  resetGo: "\u91CD\u7F6E",
-  resetIntro: "\u6E05\u7A7A\u672C\u63D2\u4EF6\u8BBE\u7F6E\u5E76\u91CD\u7F6E\u8BBF\u95EE\u5BC6\u7801\uFF0C\u4E0D\u5F71\u54CD DSH \u5176\u5B83\u6570\u636E",
-  resetTitle: "\u786E\u8BA4\u6062\u590D\u51FA\u5382\u8BBE\u7F6E\uFF1F",
-  resetBody: "\u5C06\u6E05\u7A7A\u670D\u52A1\u7AEF\u5730\u5740\u3001Token\u3001\u5F00\u5173\u4E0E\u81EA\u5B9A\u4E49\u5BC6\u7801\uFF0C\u5E76\u91CD\u7F6E\u8BBF\u95EE\u5BC6\u7801\u3002\u624B\u673A\u9700\u8981\u91CD\u65B0\u8F93\u5165\u5BC6\u7801\u3002",
+  appTitle: "DSH Relay",
+  appSub: "\u901A\u8FC7\u4F60\u81EA\u5DF1\u7684 NAS \u4ECE\u4EFB\u4F55\u7F51\u7EDC\u8BBF\u95EE\u8FD9\u53F0\u7535\u8111\u4E0A\u7684 DSH",
+  stReady: "\u5DF2\u8FDE\u63A5 NAS \xB7 \u5916\u7F51\u53EF\u8BBF\u95EE",
+  stConnecting: "\u6B63\u5728\u8FDE\u63A5 NAS\u2026",
+  stReconnecting: "\u8FDE\u63A5\u4E2D\u65AD\uFF0C\u81EA\u52A8\u91CD\u8FDE\u4E2D",
+  stIdle: "\u672A\u5F00\u542F",
+  stError: "\u8FDE\u63A5\u9519\u8BEF",
+  openRelay: "\u5F00\u542F\u5916\u7F51\u8BBF\u95EE",
+  stopRelay: "\u505C\u6B62",
+  opening: "\u8FDE\u63A5\u4E2D\u2026",
+  secWan: "\u5916\u7F51\u8BBF\u95EE\uFF08\u7ECF NAS \u4E2D\u7EE7\uFF09",
+  secLan: "\u5C40\u57DF\u7F51\u76F4\u8FDE",
+  cfgTitle: "\u8FDE\u63A5\u5230\u4F60\u7684 NAS",
+  cfgStep1: "\u2460 NAS \u670D\u52A1\u7AEF\u5730\u5740",
+  cfgStep2: "\u2461 \u90E8\u7F72\u65F6\u751F\u6210\u7684 Token",
+  serverPlaceholder: "nas.example.com \u6216 192.168.1.10:8443",
+  tokenPlaceholder: "RELAY_TOKEN \u7684\u503C",
+  cfgSave: "\u4FDD\u5B58\u5E76\u8FDE\u63A5",
+  cfgSaveOnly: "\u4FDD\u5B58",
+  cfgEdit: "\u4FEE\u6539\u670D\u52A1\u7AEF",
+  cfgCurrent: "\u5F53\u524D\u670D\u52A1\u7AEF",
+  qrHintWan: "\u624B\u673A\u6D4F\u89C8\u5668\u6253\u5F00\u6B64\u5730\u5740\uFF08\u4EFB\u610F\u7F51\u7EDC\uFF09",
+  qrHintLan: "\u624B\u673A\u8FDE\u540C\u4E00 WiFi \u626B\u7801\u76F4\u8FBE",
+  wanOffHint: "\u5F00\u542F\u540E\uFF0C\u624B\u673A\u5728\u4EFB\u610F\u7F51\u7EDC\u90FD\u80FD\u901A\u8FC7\u4F60\u7684 NAS \u8BBF\u95EE\u8FD9\u91CC\u3002",
+  pinTitle: "\u8BBF\u95EE\u5BC6\u7801",
+  pinDesc: "8 \u4F4D\u5B57\u6BCD/\u6570\u5B57\uFF1B\u81EA\u5B9A\u4E49\u540E\u4E0D\u518D\u8F6E\u6362",
+  lanPinDesc: "\u5C40\u57DF\u7F51\u5165\u53E3\u7684\u72EC\u7ACB\u5BC6\u7801",
+  lanSwitch: "\u5C40\u57DF\u7F51\u5165\u53E3",
+  lanAuthSwitch: "\u5C40\u57DF\u7F51\u5BC6\u7801",
+  lanOff: "\u5C40\u57DF\u7F51\u5165\u53E3\u5DF2\u5173\u95ED",
+  nasStats: "NAS \u5B9E\u65F6\uFF1A{phone} \u53F0\u8BBE\u5907\u5728\u7EBF \xB7 \u96A7\u9053\u6C60\u7A7A\u95F2 {idle}",
+  retryInfo: "\u7B2C {n} \u6B21\u91CD\u8BD5 \xB7 \u7EA6 {s} \u79D2\u540E\u81EA\u52A8\u91CD\u8BD5",
+  adv: "\u9AD8\u7EA7",
+  advAddress: "\u5C40\u57DF\u7F51\u5730\u5740",
+  auto: "\u81EA\u52A8\u9009\u62E9",
+  reset: "\u6062\u590D\u51FA\u5382",
+  resetDesc: "\u6E05\u7A7A\u672C\u63D2\u4EF6\u5168\u90E8\u8BBE\u7F6E\u5E76\u91CD\u7F6E\u5BC6\u7801\uFF08\u4E0D\u5F71\u54CD DSH \u5176\u5B83\u6570\u636E\uFF09",
+  resetTitle: "\u6062\u590D\u51FA\u5382\u8BBE\u7F6E\uFF1F",
+  resetBody: "\u670D\u52A1\u7AEF\u5730\u5740\u3001Token\u3001\u5F00\u5173\u4E0E\u81EA\u5B9A\u4E49\u5BC6\u7801\u90FD\u4F1A\u88AB\u6E05\u7A7A\uFF0C\u5BC6\u7801\u91CD\u7F6E\u540E\u624B\u673A\u9700\u8981\u91CD\u65B0\u8F93\u5165\u3002",
   confirm: "\u786E\u8BA4",
-  confirmRelay: "\u5F00\u542F\u5916\u7F51\u8BBF\u95EE\uFF1F",
-  relayConfirmBody: "\u5916\u7F51\u5C06\u80FD\u901A\u8FC7\u4F60\u7684 NAS \u8BBF\u95EE\u8FD9\u53F0\u7535\u8111\u4E0A\u7684 DSH\uFF08\u53EF\u6267\u884C\u4EE3\u7801\uFF09\u3002\u8BF7\u786E\u4FDD\uFF1A\n1. NAS \u5DF2\u90E8\u7F72 dsh-relay-server \u4E14\u7AEF\u53E3\u672A\u5BF9\u516C\u7F51\u8BEF\u5F00\u653E\u5176\u5B83\u670D\u52A1\n2. \u8BBF\u95EE\u5BC6\u7801\u4E0D\u8981\u6CC4\u9732\uFF08\u4E8C\u7EF4\u7801\u5373\u94A5\u5319\uFF09",
-  error: "\u9519\u8BEF\uFF1A{msg}",
-  unknown: "\u672A\u77E5\u9519\u8BEF"
+  cancel: "\u53D6\u6D88",
+  copy: "\u590D\u5236",
+  errPrefix: "\u51FA\u9519\u4E86\uFF1A"
 };
 var en = {
   localeTag: "en",
-  title: "Phone Access (Self-hosted Relay)",
-  subtitle: "LAN via QR; internet via your own NAS relay \u2014 no third-party cloud",
-  lanAccess: "LAN Access",
-  lanPin: "LAN PIN",
-  lanAuthSwitch: "PIN protection",
-  lanDisabledHint: "LAN access is disabled",
-  lanStarting: "Detecting LAN address\u2026",
-  wanAccess: "NAS Relay (Internet)",
-  enable: "Enable",
-  opening: "Starting\u2026",
+  appTitle: "DSH Relay",
+  appSub: "Reach the DSH on this computer from any network via your own NAS",
+  stReady: "Connected to NAS \xB7 internet access active",
+  stConnecting: "Connecting to NAS\u2026",
+  stReconnecting: "Connection lost, reconnecting",
+  stIdle: "Off",
+  stError: "Connection error",
+  openRelay: "Enable internet access",
   stopRelay: "Stop",
-  serverLabel: "Server address",
-  tokenLabel: "Token",
-  serverPlaceholder: "nas.example.com or nas.example.com:8443",
-  tokenPlaceholder: "RELAY_TOKEN value from your NAS",
-  save: "Save",
-  cancel: "Cancel",
-  edit: "Edit",
-  needCfg: "Set the server address and token first",
-  stateReady: "Connected \u2014 internet access active",
-  stateReconnecting: "Connection lost, reconnecting\u2026",
-  stateConnecting: "Connecting\u2026",
-  stateIdle: "Off",
+  opening: "Connecting\u2026",
+  secWan: "Internet (via NAS relay)",
+  secLan: "LAN direct",
+  cfgTitle: "Connect to your NAS",
+  cfgStep1: "\u2460 Relay server address",
+  cfgStep2: "\u2461 Token generated at deploy time",
+  serverPlaceholder: "nas.example.com or 192.168.1.10:8443",
+  tokenPlaceholder: "value of RELAY_TOKEN",
+  cfgSave: "Save & connect",
+  cfgSaveOnly: "Save",
+  cfgEdit: "Edit server",
+  cfgCurrent: "Server",
+  qrHintWan: "Open on your phone (any network)",
+  qrHintLan: "Same Wi-Fi: scan to open",
+  wanOffHint: "Once enabled, your phone can reach this DSH through your NAS from anywhere.",
+  pinTitle: "Access PIN",
+  pinDesc: "8 letters/digits; fixed once customized",
+  lanPinDesc: "Separate PIN for the LAN entry",
+  lanSwitch: "LAN entry",
+  lanAuthSwitch: "LAN PIN",
+  lanOff: "LAN entry is disabled",
+  nasStats: "NAS live: {phone} device(s) online \xB7 pool idle {idle}",
   retryInfo: "retry #{n} in ~{s}s",
-  nasStats: "phone conns {phone} \xB7 pool idle {idle}",
-  pinLabel: "Access PIN",
-  pinCustomHint: "customized",
-  refresh: "Refresh",
-  customize: "Customize",
-  customizing: "Set to",
-  resetFactory: "Factory reset",
-  resetGo: "Reset",
-  resetIntro: "Clears plugin settings and resets PINs; DSH data is untouched",
+  adv: "Advanced",
+  advAddress: "LAN address",
+  auto: "Auto",
+  reset: "Factory reset",
+  resetDesc: "Clears all plugin settings and resets PINs (DSH data untouched)",
   resetTitle: "Factory reset?",
-  resetBody: "Clears the server address, token, switches and custom PINs, and resets access PINs. Phones must sign in again.",
+  resetBody: "Server address, token, switches and custom PINs will be cleared; phones must sign in again.",
   confirm: "Confirm",
-  confirmRelay: "Enable internet access?",
-  relayConfirmBody: "Your NAS will expose this computer's DSH (which can execute code) to the internet. Make sure:\n1. dsh-relay-server is deployed on the NAS and no other port is exposed\n2. Keep the PIN / QR code private",
-  error: "Error: {msg}",
-  unknown: "unknown error"
+  cancel: "Cancel",
+  copy: "Copy",
+  errPrefix: "Error: "
 };
-var styles = {
-  card: { background: "var(--dsw-alias-bg-layer-1,#fff)", border: "1px solid var(--dsw-alias-border-l2,#e5e7eb)", borderRadius: 12, padding: "16px 20px", maxWidth: 480 },
-  block: { borderTop: "1px solid var(--dsw-alias-border-l2,#e5e7eb)", marginTop: 14, paddingTop: 14 },
-  muted: { color: "var(--dsw-alias-label-tertiary,#8b93a1)", fontSize: 12, lineHeight: 1.5 },
-  code: { fontFamily: "ui-monospace,Menlo,monospace", fontSize: 12, wordBreak: "break-all", margin: "6px 0" },
-  primary: { font: "inherit", cursor: "pointer", border: "none", background: "var(--dsw-alias-button-primary-fill,var(--dsw-alias-brand-primary,#4f6ef7))", color: "#fff", height: 32, padding: "0 14px", borderRadius: 999, fontSize: 13 },
-  btn: { font: "inherit", cursor: "pointer", border: "1px solid var(--dsw-alias-border-l2,#d1d5db)", background: "var(--dsw-alias-bg-layer-1,#fff)", color: "inherit", height: 32, padding: "0 14px", borderRadius: 999, fontSize: 13 },
+var S = {
+  wrap: { background: "var(--dsw-alias-bg-layer-1,#fff)", border: "1px solid var(--dsw-alias-border-l2,#e5e7eb)", borderRadius: 14, overflow: "hidden" },
+  banner: (color) => ({ display: "flex", alignItems: "center", gap: 10, padding: "14px 18px", background: color, color: "#fff" }),
+  dot: () => ({ width: 10, height: 10, borderRadius: "50%", background: "#fff", boxShadow: "0 0 0 3px rgba(255,255,255,.25)", flexShrink: 0 }),
+  body: { padding: "14px 18px 18px" },
+  sectionLabel: { fontSize: 11, fontWeight: 700, letterSpacing: 1, color: "var(--dsw-alias-label-tertiary,#8b93a1)", textTransform: "uppercase", margin: "18px 0 8px" },
+  card: { border: "1px solid var(--dsw-alias-border-l2,#e5e7eb)", borderRadius: 10, padding: "12px 14px" },
+  field: { fontSize: 12, color: "var(--dsw-alias-label-secondary,#6b7280)" },
+  input: { font: "inherit", display: "block", width: "100%", boxSizing: "border-box", padding: "8px 10px", fontSize: 13, border: "1px solid var(--dsw-alias-border-l2,#d1d5db)", borderRadius: 8, outline: "none", marginTop: 4, background: "var(--dsw-alias-bg-layer-1,#fff)", color: "inherit" },
+  primary: { font: "inherit", cursor: "pointer", border: "none", background: "var(--dsw-alias-button-primary-fill,var(--dsw-alias-brand-primary,#4f6ef7))", color: "#fff", height: 34, padding: "0 18px", borderRadius: 8, fontSize: 13, fontWeight: 600 },
+  mini: { font: "inherit", cursor: "pointer", border: "1px solid var(--dsw-alias-border-l2,#d1d5db)", background: "transparent", color: "inherit", height: 24, padding: "0 8px", borderRadius: 6, fontSize: 11 },
   danger: { color: "var(--dsw-alias-state-error-primary,#dc2626)" },
-  warn: { color: "var(--dsw-alias-state-warn-primary,#b45309)", fontSize: 12, lineHeight: 1.5 },
-  qr: { width: 200, height: 200, borderRadius: 10, border: "1px solid var(--dsw-alias-border-l2,#e5e7eb)", margin: "8px 0" },
-  input: { font: "inherit", padding: "5px 9px", fontSize: 13, border: "1px solid var(--dsw-alias-border-l2,#d1d5db)", borderRadius: 6, outline: "none", margin: "4px 0 0 6px", width: 220 },
-  switchWrap: { flexShrink: 0, width: 40, height: 22, borderRadius: 11, border: "none", padding: 0, position: "relative", cursor: "pointer", font: "inherit" }
+  url: { font: "600 15px ui-monospace,Menlo,monospace", wordBreak: "break-all", color: "var(--dsw-alias-label-primary,inherit)" },
+  pin: { font: "16px ui-monospace,Menlo,monospace", letterSpacing: 3 },
+  muted: { color: "var(--dsw-alias-label-tertiary,#8b93a1)", fontSize: 12, lineHeight: 1.5 },
+  qr: { width: 132, height: 132, borderRadius: 8, display: "block" },
+  grid2: { display: "grid", gridTemplateColumns: "132px 1fr", gap: 14, alignItems: "start" },
+  warn: { color: "var(--dsw-alias-state-warn-primary,#b45309)", fontSize: 12 },
+  err: { color: "var(--dsw-alias-state-error-primary,#dc2626)", fontSize: 12 }
 };
+var STATE_COLORS = { ready: "#16a34a", connecting: "#d97706", reconnecting: "#d97706", error: "#dc2626", idle: "#6b7280" };
 function Switch(on, onClick) {
   return (0, import_react.createElement)(
     "button",
-    { role: "switch", "aria-checked": !!on, style: { ...styles.switchWrap, background: on ? "var(--dsw-alias-button-primary-fill,var(--dsw-alias-brand-primary,#4f6ef7))" : "var(--dsw-alias-border-l2,#d1d5db)" }, onClick },
-    (0, import_react.createElement)("span", { style: { position: "absolute", top: 2, left: on ? 20 : 2, width: 18, height: 18, borderRadius: "50%", background: "#fff" } })
+    { role: "switch", "aria-checked": !!on, onClick, style: { flexShrink: 0, width: 38, height: 20, borderRadius: 10, border: "none", padding: 0, position: "relative", cursor: "pointer", font: "inherit", background: on ? "var(--dsw-alias-button-primary-fill,var(--dsw-alias-brand-primary,#4f6ef7))" : "var(--dsw-alias-border-l2,#d1d5db)" } },
+    (0, import_react.createElement)("span", { style: { position: "absolute", top: 2, left: on ? 19 : 2, width: 16, height: 16, borderRadius: "50%", background: "#fff" } })
   );
 }
 function RelaySettingsTab({ rpcCall, t }) {
@@ -184,299 +197,312 @@ function RelaySettingsTab({ rpcCall, t }) {
     if (vars) for (const [k, v] of Object.entries(vars)) s = String(s).split(`{${k}}`).join(String(v));
     return s;
   };
-  const [status, setStatus] = (0, import_react.useState)(null);
+  const [st, setSt] = (0, import_react.useState)(null);
   const [busy, setBusy] = (0, import_react.useState)(false);
+  const [cfgEdit, setCfgEdit] = (0, import_react.useState)(null);
+  const [pinEdit, setPinEdit] = (0, import_react.useState)(null);
+  const [dialog, setDialog] = (0, import_react.useState)(null);
   const [error, setError] = (0, import_react.useState)(null);
-  const [editing, setEditing] = (0, import_react.useState)(null);
-  const [resetOpen, setResetOpen] = (0, import_react.useState)(false);
-  const [confirmOpen, setConfirmOpen] = (0, import_react.useState)(false);
-  const [customPin, setCustomPin] = (0, import_react.useState)(null);
   const [toast, setToast] = (0, import_react.useState)(null);
-  const toastTimer = (0, import_react.useRef)(null);
-  const showToast = (text) => {
-    setToast(text);
-    clearTimeout(toastTimer.current);
-    toastTimer.current = setTimeout(() => setToast(null), 2200);
+  const toastT = (0, import_react.useRef)(null);
+  const showToast = (m) => {
+    setToast(m);
+    clearTimeout(toastT.current);
+    toastT.current = setTimeout(() => setToast(null), 2e3);
   };
-  const call = async (endpoint, payload) => {
-    const res = await rpcCall(endpoint, payload);
-    if (!res?.ok) throw new Error(res?.error?.message ?? "RPC failed");
-    return res.value;
+  const call = async (ep, payload) => {
+    const r = await rpcCall(ep, payload);
+    if (!r?.ok) throw new Error(r?.error?.message ?? "RPC failed");
+    return r.value;
   };
-  const load = async () => {
+  const poll = async () => {
     try {
-      setStatus(redactStatus(await call(RELAY_ENDPOINTS.status, {})));
+      setSt(redactStatus(await call(RELAY_ENDPOINTS.status, {})));
     } catch {
     }
   };
   (0, import_react.useEffect)(() => {
-    load();
-    const timer = setInterval(load, 3e3);
-    return () => clearInterval(timer);
+    poll();
+    const t2 = setInterval(poll, 3e3);
+    return () => clearInterval(t2);
   }, []);
-  const errText = (msg) => {
-    const s = String(msg ?? "");
+  const errText = (m) => {
+    const s = String(m ?? "");
     const i = s.indexOf(" | ");
-    const pick = i < 0 ? s : t("localeTag") === "en" ? s.slice(i + 3) : s.slice(0, i);
-    return pick.trim();
+    return i < 0 ? s : (t("localeTag") === "en" ? s.slice(i + 3) : s.slice(0, i)).trim();
   };
-  const startRelay = async () => {
+  const apply2 = async (fn) => {
     setBusy(true);
     setError(null);
     try {
-      setStatus(redactStatus(await call(RELAY_ENDPOINTS.relayStart, { confirm: true })));
-    } catch (err) {
-      setError(err.message);
+      setSt(redactStatus(await fn()));
+    } catch (e) {
+      setError(e.message);
     } finally {
       setBusy(false);
     }
   };
-  const stopRelay = async () => {
+  const copy = (text) => {
     try {
-      setStatus(redactStatus(await call(RELAY_ENDPOINTS.relayStop, {})));
+      navigator.clipboard.writeText(text);
+      showToast("\u2713");
     } catch {
     }
   };
-  const saveConfig = async () => {
+  const phase = st?.relayState?.phase ?? "idle";
+  const cfg = st?.relayConfig ?? { url: "", tokenSet: false };
+  const rs = st?.relayState ?? {};
+  const bannerText = phase === "ready" ? t("stReady") : phase === "reconnecting" ? t("stReconnecting") : phase === "connecting" ? t("stConnecting") : phase === "error" ? t("stError") : t("stIdle");
+  const bannerColor = STATE_COLORS[phase] ?? STATE_COLORS.idle;
+  const errOf = (m) => (0, import_react.createElement)("div", { style: S.err }, t("errPrefix") + errText(m));
+  const savePin = async (which) => {
     try {
-      setStatus(redactStatus(await call(RELAY_ENDPOINTS.relaySetConfig, { url: editing?.url ?? "", token: editing?.token ?? "" })));
-      setEditing(null);
-      showToast(t("save") + " \u2713");
-    } catch (err) {
-      setEditing((c) => ({ ...c, err: errText(err.message) }));
+      setSt(redactStatus(await call(RELAY_ENDPOINTS.pinSetCustom, { which, value: pinEdit?.value ?? "" })));
+      setPinEdit(null);
+    } catch (e) {
+      setPinEdit((c) => ({ ...c, err: e.message }));
     }
   };
-  const saveCustomPin = async (which) => {
-    try {
-      setStatus(redactStatus(await call(RELAY_ENDPOINTS.pinSetCustom, { which, value: customPin?.value ?? "" })));
-      setCustomPin(null);
-    } catch (err) {
-      setCustomPin((c) => ({ ...c, err: errText(err.message) }));
-    }
-  };
-  const doFactoryReset = async () => {
-    setResetOpen(false);
-    setBusy(true);
-    try {
-      setStatus(redactStatus(await call(RELAY_ENDPOINTS.relayReset, { confirm: true })));
-      setEditing(null);
-      setCustomPin(null);
-      showToast("\u2713");
-    } catch (err) {
-      setError(err.message);
-    } finally {
-      setBusy(false);
-    }
-  };
-  const relayState = status?.relayState ?? { phase: "idle" };
-  const cfg = status?.relayConfig ?? { url: "", tokenSet: false };
-  const row = (label, control, extra) => (0, import_react.createElement)(
+  const pinBlock = (which, value, custom, desc) => (0, import_react.createElement)(
     "div",
-    { style: { borderTop: "1px solid var(--dsw-alias-border-l2,#e5e7eb)", paddingTop: 9, marginTop: 9 } },
-    (0, import_react.createElement)("div", { style: { display: "flex", alignItems: "center", justifyContent: "space-between", gap: 8 } }, (0, import_react.createElement)("span", { style: { fontSize: 13 } }, label), control),
-    extra ?? null
-  );
-  const qrArea = (src, url, hint) => (0, import_react.createElement)(
-    "div",
-    { style: { background: "var(--dsw-alias-bg-layer-2,#f3f4f6)", borderRadius: 10, padding: "10px 12px", textAlign: "center", margin: "10px 0" } },
-    src ? (0, import_react.createElement)("img", { src, alt: "QR", style: styles.qr }) : null,
-    (0, import_react.createElement)("div", { style: styles.code }, url),
-    (0, import_react.createElement)("div", { style: styles.muted }, hint)
-  );
-  const pinRow = (which, label, value, custom) => row(
-    label,
-    customPin?.which === which ? null : (0, import_react.createElement)(
-      "span",
-      { style: { display: "inline-flex", alignItems: "center", gap: 8 } },
-      (0, import_react.createElement)("span", { style: { fontFamily: "ui-monospace,Menlo,monospace", fontSize: 13, letterSpacing: 1 } }, value),
-      (0, import_react.createElement)("button", { style: { ...styles.btn, height: 26, padding: "0 10px", fontSize: 12 }, onClick: () => setCustomPin({ which, value: "", err: null }) }, t("customize"))
-    ),
-    customPin?.which === which ? (0, import_react.createElement)(
+    { style: { marginTop: 10 } },
+    (0, import_react.createElement)(
       "div",
-      { style: { marginTop: 6, fontSize: 12, display: "flex", alignItems: "center", gap: 6, flexWrap: "wrap" } },
-      t("customizing"),
+      { style: { display: "flex", alignItems: "baseline", justifyContent: "space-between" } },
+      (0, import_react.createElement)("span", { style: { ...S.field, fontWeight: 600 } }, t("pinTitle")),
+      custom ? (0, import_react.createElement)("span", { style: S.muted }, "\u2713") : null
+    ),
+    (0, import_react.createElement)("div", { style: S.muted }, desc),
+    pinEdit?.which === which ? (0, import_react.createElement)(
+      "div",
+      { style: { display: "flex", gap: 6, marginTop: 6, alignItems: "center" } },
       (0, import_react.createElement)("input", {
-        style: { ...styles.input, width: 110, margin: 0, textAlign: "center", letterSpacing: 2 },
-        type: "password",
+        style: { ...S.input, width: 120, marginTop: 0, textAlign: "center", letterSpacing: 3, fontSize: 15 },
         maxLength: 8,
-        value: customPin.value ?? "",
         autoFocus: true,
-        onChange: (e) => setCustomPin((c) => ({ ...c, value: e.target.value.replace(/[^a-zA-Z0-9]/g, ""), err: null })),
+        value: pinEdit.value ?? "",
+        onChange: (e) => setPinEdit((c) => ({ ...c, value: e.target.value.replace(/[^a-zA-Z0-9]/g, "") })),
         onKeyDown: (e) => {
-          if (e.key === "Enter") saveCustomPin(which);
-          if (e.key === "Escape") setCustomPin(null);
+          if (e.key === "Enter") savePin(which);
+          if (e.key === "Escape") setPinEdit(null);
         }
       }),
-      (0, import_react.createElement)("button", { style: { ...styles.btn, height: 26, padding: "0 10px", fontSize: 12 }, onClick: () => saveCustomPin(which) }, t("save")),
-      (0, import_react.createElement)("button", { style: { ...styles.btn, height: 26, padding: "0 10px", fontSize: 12 }, onClick: () => setCustomPin(null) }, t("cancel")),
-      customPin?.err ? (0, import_react.createElement)("span", { style: styles.danger }, customPin.err) : null
-    ) : custom ? (0, import_react.createElement)("div", { style: { ...styles.muted, marginTop: 4 } }, t("pinCustomHint")) : null
+      (0, import_react.createElement)("button", { style: S.mini, onClick: () => savePin(which) }, "\u2713"),
+      (0, import_react.createElement)("button", { style: S.mini, onClick: () => setPinEdit(null) }, "\u2715"),
+      pinEdit.err ? errOf(pinEdit.err) : null
+    ) : (0, import_react.createElement)(
+      "div",
+      { style: { display: "flex", alignItems: "center", gap: 8, marginTop: 6 } },
+      (0, import_react.createElement)("span", { style: S.pin }, value ?? "\xB7\xB7\xB7\xB7\xB7\xB7\xB7\xB7"),
+      (0, import_react.createElement)("button", { style: S.mini, onClick: () => setPinEdit({ which, value: "" }) }, t("customize")),
+      which === "lan" ? null : (0, import_react.createElement)("span", { style: S.muted }, t("pinDesc"))
+    )
   );
-  return (0, import_react.createElement)(
+  const saveCfg = async (andStart) => {
+    try {
+      setSt(redactStatus(await call(RELAY_ENDPOINTS.relaySetConfig, { url: cfgEdit?.url ?? "", token: cfgEdit?.token ?? "" })));
+      setCfgEdit(null);
+      if (andStart) setSt(redactStatus(await call(RELAY_ENDPOINTS.relayStart, { confirm: true })));
+    } catch (e) {
+      setCfgEdit((c) => ({ ...c, err: e.message }));
+    }
+  };
+  const wanOn = st?.relayRunning === true;
+  const wanConfigured = Boolean(cfg.url);
+  const wanCfgForm = (0, import_react.createElement)(
     "div",
-    { style: styles.card },
+    null,
+    (0, import_react.createElement)("div", { style: { fontWeight: 600, fontSize: 13, marginBottom: 8 } }, t("cfgTitle")),
+    (0, import_react.createElement)("div", { style: S.field }, t("cfgStep1")),
+    (0, import_react.createElement)("input", {
+      style: S.input,
+      placeholder: t("serverPlaceholder"),
+      value: cfgEdit?.url ?? "",
+      autoFocus: true,
+      onChange: (e) => setCfgEdit((c) => ({ ...c, url: e.target.value.trim() }))
+    }),
+    (0, import_react.createElement)("div", { style: { ...S.field, marginTop: 10 } }, t("cfgStep2")),
+    (0, import_react.createElement)("input", {
+      style: { ...S.input, fontFamily: "ui-monospace,Menlo,monospace" },
+      type: "password",
+      placeholder: t("tokenPlaceholder"),
+      value: cfgEdit?.token ?? "",
+      onChange: (e) => setCfgEdit((c) => ({ ...c, token: e.target.value.trim() }))
+    }),
+    (0, import_react.createElement)(
+      "div",
+      { style: { display: "flex", gap: 8, marginTop: 12 } },
+      (0, import_react.createElement)("button", { style: S.primary, disabled: busy, onClick: () => saveCfg(true) }, busy ? t("opening") : t("cfgSave"))
+    )
+  );
+  const wanHead = (0, import_react.createElement)(
+    "div",
+    { style: { display: "flex", alignItems: "center", justifyContent: "space-between", flexWrap: "wrap", gap: 6 } },
     (0, import_react.createElement)(
       "div",
       null,
-      (0, import_react.createElement)("strong", null, t("title")),
-      (0, import_react.createElement)("div", { style: styles.muted }, t("subtitle"))
+      (0, import_react.createElement)("div", { style: { ...S.field, fontWeight: 600 } }, t("cfgCurrent")),
+      (0, import_react.createElement)("div", { style: S.url }, cfg.url || "\u2014")
     ),
-    // 局域网
-    (0, import_react.createElement)(
-      "div",
-      { style: styles.block },
-      (0, import_react.createElement)(
-        "div",
-        { style: { display: "flex", alignItems: "center", justifyContent: "space-between" } },
-        (0, import_react.createElement)("span", { style: { fontWeight: 600, fontSize: 13 } }, t("lanAccess")),
-        Switch(status?.lanEnabled !== false, async () => {
-          try {
-            setStatus(redactStatus(await call(RELAY_ENDPOINTS.lanSetEnabled, { on: status?.lanEnabled === false })));
-          } catch (err) {
-            setError(err.message);
-          }
-        })
-      ),
-      status?.lanEnabled === false ? (0, import_react.createElement)("div", { style: { ...styles.warn, marginTop: 8 } }, t("lanDisabledHint")) : status?.lanUrl ? (0, import_react.createElement)(
-        "div",
-        null,
-        qrArea(status.lanQr, status.lanUrl, "http \xB7 \u540C\u4E00\u5C40\u57DF\u7F51"),
-        pinRow("lan", t("lanPin"), status.lanToken ?? "\u2014", status.lanPinCustom),
-        row(t("lanAuthSwitch"), Switch(status?.lanAuthEnabled !== false, async () => {
-          try {
-            setStatus(redactStatus(await call(RELAY_ENDPOINTS.lanAuthSetEnabled, { on: status?.lanAuthEnabled === false })));
-          } catch (err) {
-            setError(err.message);
-          }
-        }))
-      ) : (0, import_react.createElement)("div", { style: styles.muted }, t("lanStarting"))
-    ),
-    // NAS 中继
-    (0, import_react.createElement)(
-      "div",
-      { style: styles.block },
-      (0, import_react.createElement)(
-        "div",
-        { style: { display: "flex", alignItems: "center", justifyContent: "space-between" } },
-        (0, import_react.createElement)("span", { style: { fontWeight: 600, fontSize: 13 } }, t("wanAccess")),
-        status?.relayRunning ? (0, import_react.createElement)("button", { style: { ...styles.btn, ...styles.danger, height: 28, padding: "0 12px", fontSize: 12 }, onClick: stopRelay }, t("stopRelay")) : (0, import_react.createElement)("button", { style: { ...styles.primary, height: 28, padding: "0 14px", fontSize: 12 }, disabled: busy, onClick: () => setConfirmOpen(true) }, busy ? t("opening") : t("enable"))
-      ),
-      relayState.phase === "reconnecting" ? (0, import_react.createElement)(
-        "div",
-        { style: { marginTop: 8, fontSize: 12, color: "#b45309" } },
-        t("stateReconnecting"),
-        relayState.attempts ? (0, import_react.createElement)("div", { style: styles.muted }, tf("retryInfo", { n: relayState.attempts, s: relayState.nextRetryAt ? Math.max(0, Math.ceil((relayState.nextRetryAt - Date.now()) / 1e3)) : "\u2014" })) : null
-      ) : relayState.phase === "connecting" ? (0, import_react.createElement)("div", { style: { marginTop: 8, fontSize: 12, color: "#6b7280" } }, t("stateConnecting")) : relayState.phase === "error" ? (0, import_react.createElement)("div", { style: { marginTop: 8, fontSize: 12, ...styles.danger } }, t("error", { msg: errText(relayState.detail) || t("unknown") })) : null,
-      status?.relayRunning ? (0, import_react.createElement)(
-        "div",
-        null,
-        qrArea(status.relayQr, status.relayUrl, "https \xB7 \u4EFB\u610F\u7F51\u7EDC"),
-        relayState.server?.phone !== void 0 ? (0, import_react.createElement)("div", { style: styles.muted }, tf("nasStats", { phone: relayState.server.phone, idle: relayState.server.idle ?? "\u2014" })) : null,
-        pinRow("public", t("pinLabel"), status.accessToken ?? "\u2014", status.publicPinCustom)
-      ) : (0, import_react.createElement)("div", { style: { marginTop: 8, ...styles.muted } }, t("stateIdle")),
-      // 服务端配置（地址 + token）
-      row(
-        `${t("serverLabel")} / ${t("tokenLabel")}`,
-        editing ? null : (0, import_react.createElement)(
-          "span",
-          { style: { display: "inline-flex", alignItems: "center", gap: 8 } },
-          (0, import_react.createElement)("span", { style: { fontSize: 12, fontFamily: "ui-monospace,Menlo,monospace" } }, cfg.url || "\u2014"),
-          (0, import_react.createElement)("button", { style: { ...styles.btn, height: 26, padding: "0 10px", fontSize: 12 }, onClick: () => setEditing({ url: cfg.url ?? "", token: "", err: null }) }, t("edit"))
-        ),
-        editing ? (0, import_react.createElement)(
-          "div",
-          { style: { marginTop: 6 } },
-          (0, import_react.createElement)(
-            "div",
-            null,
-            t("serverLabel"),
-            (0, import_react.createElement)("input", {
-              style: styles.input,
-              placeholder: t("serverPlaceholder"),
-              value: editing.url,
-              autoFocus: true,
-              onChange: (e) => setEditing((c) => ({ ...c, url: e.target.value.trim(), err: null })),
-              onKeyDown: (e) => {
-                if (e.key === "Escape") setEditing(null);
-              }
-            })
-          ),
-          (0, import_react.createElement)(
-            "div",
-            { style: { marginTop: 6 } },
-            t("tokenLabel"),
-            (0, import_react.createElement)("input", {
-              style: { ...styles.input, fontFamily: "ui-monospace,Menlo,monospace" },
-              type: "password",
-              placeholder: editing?.token === null && cfg.tokenSet ? "\u2022\u2022\u2022\u2022\u2022\u2022" : t("tokenPlaceholder"),
-              value: editing.token,
-              onChange: (e) => setEditing((c) => ({ ...c, token: e.target.value.trim(), err: null })),
-              onKeyDown: (e) => {
-                if (e.key === "Enter") saveConfig();
-                if (e.key === "Escape") setEditing(null);
-              }
-            })
-          ),
-          (0, import_react.createElement)(
-            "div",
-            { style: { marginTop: 8, display: "flex", gap: 8 } },
-            (0, import_react.createElement)("button", { style: { ...styles.btn, height: 26, padding: "0 12px", fontSize: 12 }, onClick: saveConfig }, t("save")),
-            (0, import_react.createElement)("button", { style: { ...styles.btn, height: 26, padding: "0 12px", fontSize: 12 }, onClick: () => setEditing(null) }, t("cancel"))
-          ),
-          editing.err ? (0, import_react.createElement)("div", { style: { ...styles.danger, marginTop: 4, fontSize: 12 } }, editing.err) : null
-        ) : (0, import_react.createElement)("div", { style: { ...styles.muted, marginTop: 4 } }, cfg.tokenSet ? "Token \u2713" : t("needCfg"))
-      )
-    ),
-    error ? (0, import_react.createElement)("div", { style: { ...styles.danger, fontSize: 12, marginTop: 8 } }, `\u274C ${errText(error)}`) : null,
-    // 恢复出厂
-    (0, import_react.createElement)(
-      "div",
-      { style: styles.block },
-      (0, import_react.createElement)(
-        "div",
-        { style: { display: "flex", alignItems: "center", justifyContent: "space-between" } },
-        (0, import_react.createElement)("span", { style: { fontWeight: 600, fontSize: 13 } }, t("resetFactory")),
-        (0, import_react.createElement)("button", { style: { ...styles.btn, height: 28, padding: "0 12px", fontSize: 12, ...styles.danger }, onClick: () => setResetOpen(true) }, t("resetGo"))
-      ),
-      (0, import_react.createElement)("div", { style: { ...styles.muted, marginTop: 6 } }, t("resetIntro"))
-    ),
-    // 确认弹框：开启外网
-    confirmOpen ? (0, import_react.createElement)("div", { style: dialogMask() }, (0, import_react.createElement)(
-      "div",
-      { style: dialogCard() },
-      (0, import_react.createElement)("div", { style: { fontWeight: 600, fontSize: 15, marginBottom: 10, color: "#b45309" } }, t("confirmRelay")),
-      (0, import_react.createElement)("div", { style: { fontSize: 13, lineHeight: 1.7, whiteSpace: "pre-line" } }, t("relayConfirmBody")),
-      (0, import_react.createElement)(
-        "div",
-        { style: { display: "flex", gap: 8, marginTop: 16 } },
-        (0, import_react.createElement)("button", { style: { ...styles.btn, flex: 1 }, onClick: () => setConfirmOpen(false) }, t("cancel")),
-        (0, import_react.createElement)("button", { style: { ...styles.primary, flex: 1 }, onClick: () => {
-          setConfirmOpen(false);
-          startRelay();
-        } }, t("confirm"))
-      )
-    )) : null,
-    // 确认弹框：恢复出厂
-    resetOpen ? (0, import_react.createElement)("div", { style: dialogMask() }, (0, import_react.createElement)(
-      "div",
-      { style: dialogCard() },
-      (0, import_react.createElement)("div", { style: { fontWeight: 600, fontSize: 15, marginBottom: 10, color: "#b45309" } }, t("resetTitle")),
-      (0, import_react.createElement)("div", { style: { fontSize: 13, lineHeight: 1.7 } }, t("resetBody")),
-      (0, import_react.createElement)(
-        "div",
-        { style: { display: "flex", gap: 8, marginTop: 16 } },
-        (0, import_react.createElement)("button", { style: { ...styles.btn, flex: 1 }, onClick: () => setResetOpen(false) }, t("cancel")),
-        (0, import_react.createElement)("button", { style: { ...styles.primary, flex: 1, background: "var(--dsw-alias-state-error-primary,#dc2626)" }, onClick: doFactoryReset }, t("confirm"))
-      )
-    )) : null,
-    toast ? (0, import_react.createElement)("div", { style: { position: "fixed", left: "50%", top: "50%", transform: "translate(-50%,-50%)", zIndex: 10001, background: "rgba(17,24,39,.92)", color: "#fff", borderRadius: 10, padding: "10px 16px", fontSize: 13 } }, toast) : null
+    (0, import_react.createElement)("button", { style: S.mini, onClick: () => setCfgEdit({ url: cfg.url ?? "", token: "", err: null }) }, t("cfgEdit"))
   );
-}
-function dialogMask() {
-  return { position: "fixed", inset: 0, zIndex: 1e4, background: "rgba(0,0,0,.5)", display: "flex", alignItems: "center", justifyContent: "center", padding: 20 };
-}
-function dialogCard() {
-  return { background: "var(--dsw-alias-bg-layer-1,#fff)", borderRadius: 12, maxWidth: 420, width: "100%", padding: "20px 22px", boxShadow: "0 8px 32px rgba(0,0,0,.18)" };
+  const wanEditForm = (0, import_react.createElement)(
+    "div",
+    { style: { marginTop: 10, paddingTop: 10, borderTop: "1px solid var(--dsw-alias-border-l2,#e5e7eb)" } },
+    (0, import_react.createElement)("div", { style: S.field }, t("cfgStep1")),
+    (0, import_react.createElement)("input", { style: S.input, value: cfgEdit?.url ?? "", onChange: (e) => setCfgEdit((c) => ({ ...c, url: e.target.value.trim() })) }),
+    (0, import_react.createElement)("div", { style: { ...S.field, marginTop: 8 } }, t("cfgStep2")),
+    (0, import_react.createElement)("input", { style: { ...S.input, fontFamily: "ui-monospace,Menlo,monospace" }, type: "password", placeholder: cfg.tokenSet ? "\u2022\u2022\u2022\u2022\u2022\u2022\u2022\u2022" : t("tokenPlaceholder"), value: cfgEdit?.token ?? "", onChange: (e) => setCfgEdit((c) => ({ ...c, token: e.target.value.trim() })) }),
+    (0, import_react.createElement)(
+      "div",
+      { style: { display: "flex", gap: 8, marginTop: 10, alignItems: "center" } },
+      (0, import_react.createElement)("button", { style: S.mini, onClick: () => saveCfg(false) }, t("cfgSaveOnly")),
+      (0, import_react.createElement)("button", { style: S.mini, onClick: () => setCfgEdit(null) }, t("cancel")),
+      cfgEdit?.err ? errOf(cfgEdit.err) : null
+    )
+  );
+  const wanStart = (0, import_react.createElement)(
+    "div",
+    { style: { marginTop: 12 } },
+    (0, import_react.createElement)("div", { style: S.muted }, t("wanOffHint")),
+    (0, import_react.createElement)("button", { style: { ...S.primary, marginTop: 8 }, disabled: busy, onClick: () => apply2(() => call(RELAY_ENDPOINTS.relayStart, { confirm: true })) }, busy ? t("opening") : t("openRelay"))
+  );
+  const wanQr = (0, import_react.createElement)(
+    "div",
+    { style: { ...S.grid2, marginTop: 12 } },
+    (0, import_react.createElement)("img", { src: st.relayQr, alt: "QR", style: S.qr }),
+    (0, import_react.createElement)(
+      "div",
+      null,
+      (0, import_react.createElement)("div", { style: S.url }, st.relayUrl),
+      (0, import_react.createElement)("div", { style: { ...S.muted, margin: "4px 0 10px" } }, t("qrHintWan")),
+      (0, import_react.createElement)("button", { style: S.mini, onClick: () => copy(st.relayUrl) }, t("copy")),
+      rs.server?.phone !== void 0 ? (0, import_react.createElement)("div", { style: { ...S.muted, marginTop: 10 } }, tf("nasStats", { phone: rs.server.phone, idle: rs.server.idle ?? "\u2014" })) : null,
+      pinBlock("public", st.accessToken, st.publicPinCustom, t("pinDesc"))
+    )
+  );
+  const wanBlock = (0, import_react.createElement)(
+    "div",
+    { style: S.card },
+    !wanOn && !wanConfigured ? wanCfgForm : wanHead,
+    cfgEdit ? wanEditForm : null,
+    !wanOn ? wanStart : null,
+    wanOn ? wanQr : null
+  );
+  const lanBlock = (0, import_react.createElement)(
+    "div",
+    { style: S.card },
+    st?.lanEnabled === false ? (0, import_react.createElement)(
+      "div",
+      { style: { display: "flex", alignItems: "center", justifyContent: "space-between" } },
+      (0, import_react.createElement)("span", { style: S.muted }, t("lanOff")),
+      Switch(false, () => apply2(() => call(RELAY_ENDPOINTS.lanSetEnabled, { on: true })))
+    ) : (0, import_react.createElement)(
+      "div",
+      null,
+      (0, import_react.createElement)(
+        "div",
+        { style: { display: "flex", alignItems: "center", justifyContent: "space-between" } },
+        (0, import_react.createElement)("span", { style: { ...S.field, fontWeight: 600 } }, t("lanSwitch")),
+        Switch(true, () => apply2(() => call(RELAY_ENDPOINTS.lanSetEnabled, { on: false })))
+      ),
+      st?.lanUrl ? (0, import_react.createElement)(
+        "div",
+        { style: { ...S.grid2, marginTop: 10 } },
+        (0, import_react.createElement)("img", { src: st.lanQr, alt: "QR", style: S.qr }),
+        (0, import_react.createElement)(
+          "div",
+          null,
+          (0, import_react.createElement)("div", { style: { ...S.url, fontSize: 13 } }, st.lanUrl),
+          (0, import_react.createElement)("div", { style: { ...S.muted, margin: "4px 0 8px" } }, t("qrHintLan")),
+          (0, import_react.createElement)(
+            "div",
+            { style: { display: "flex", alignItems: "center", gap: 8 } },
+            (0, import_react.createElement)("span", { style: { ...S.field, fontWeight: 600 } }, t("lanAuthSwitch")),
+            Switch(st.lanAuthEnabled !== false, () => apply2(() => call(RELAY_ENDPOINTS.lanAuthSetEnabled, { on: st?.lanAuthEnabled === false })))
+          ),
+          st.lanAuthEnabled !== false ? pinBlock("lan", st.lanToken, st.lanPinCustom, t("lanPinDesc")) : null
+        )
+      ) : (0, import_react.createElement)("div", { style: S.muted }, "\u2026")
+    )
+  );
+  const advBlock = (0, import_react.createElement)(
+    "div",
+    { style: S.card },
+    (0, import_react.createElement)(
+      "div",
+      { style: { display: "flex", alignItems: "center", justifyContent: "space-between", flexWrap: "wrap", gap: 8 } },
+      (0, import_react.createElement)("span", { style: { ...S.field, fontWeight: 600 } }, t("advAddress")),
+      (0, import_react.createElement)(
+        "select",
+        { value: st?.lanIpOverride ?? "", style: { ...S.input, width: "auto", marginTop: 0 }, onChange: (e) => apply2(() => call(RELAY_ENDPOINTS.lanSetOverride, { ip: e.target.value })) },
+        (0, import_react.createElement)("option", { value: "" }, t("auto")),
+        (st?.lanCandidates ?? []).map((ip) => (0, import_react.createElement)("option", { key: ip, value: ip }, ip))
+      )
+    ),
+    (0, import_react.createElement)(
+      "div",
+      { style: { display: "flex", alignItems: "center", justifyContent: "space-between", marginTop: 12, paddingTop: 10, borderTop: "1px solid var(--dsw-alias-border-l2,#e5e7eb)" } },
+      (0, import_react.createElement)("span", { style: { ...S.field, fontWeight: 600, ...S.danger } }, t("reset")),
+      (0, import_react.createElement)("button", { style: { ...S.mini, ...S.danger }, onClick: () => setDialog("reset") }, t("reset"))
+    ),
+    (0, import_react.createElement)("div", { style: S.muted }, t("resetDesc"))
+  );
+  return (0, import_react.createElement)(
+    "div",
+    { style: S.wrap },
+    (0, import_react.createElement)(
+      "div",
+      { style: S.banner(bannerColor) },
+      (0, import_react.createElement)("span", { style: S.dot() }),
+      (0, import_react.createElement)(
+        "div",
+        { style: { flex: 1 } },
+        (0, import_react.createElement)("div", { style: { fontWeight: 700, fontSize: 15 } }, t("appTitle")),
+        (0, import_react.createElement)("div", { style: { fontSize: 12, opacity: 0.9 } }, bannerText)
+      ),
+      wanOn ? (0, import_react.createElement)("button", { style: { ...S.mini, borderColor: "rgba(255,255,255,.5)", color: "#fff", height: 28, fontSize: 12 }, onClick: () => apply2(() => call(RELAY_ENDPOINTS.relayStop, {})) }, t("stopRelay")) : null
+    ),
+    (0, import_react.createElement)(
+      "div",
+      { style: S.body },
+      (0, import_react.createElement)("div", { style: { ...S.muted, marginTop: -6, marginBottom: 4 } }, t("appSub")),
+      phase === "reconnecting" && rs.attempts ? (0, import_react.createElement)("div", { style: { ...S.warn, marginBottom: 6 } }, tf("retryInfo", { n: rs.attempts, s: rs.nextRetryAt ? Math.max(0, Math.ceil((rs.nextRetryAt - Date.now()) / 1e3)) : "\u2014" })) : null,
+      error ? (0, import_react.createElement)("div", { style: { ...S.err, marginBottom: 6 } }, t("errPrefix") + errText(error)) : null,
+      (0, import_react.createElement)("div", { style: S.sectionLabel }, t("secWan")),
+      wanBlock,
+      (0, import_react.createElement)("div", { style: S.sectionLabel }, t("secLan")),
+      lanBlock,
+      (0, import_react.createElement)("div", { style: S.sectionLabel }, t("adv")),
+      advBlock
+    ),
+    dialog === "reset" ? (0, import_react.createElement)(
+      "div",
+      { style: { position: "fixed", inset: 0, zIndex: 1e4, background: "rgba(0,0,0,.5)", display: "flex", alignItems: "center", justifyContent: "center", padding: 20 } },
+      (0, import_react.createElement)(
+        "div",
+        { style: { background: "var(--dsw-alias-bg-layer-1,#fff)", borderRadius: 12, maxWidth: 400, width: "100%", padding: "20px 22px" } },
+        (0, import_react.createElement)("div", { style: { fontWeight: 700, fontSize: 15, marginBottom: 8 } }, t("resetTitle")),
+        (0, import_react.createElement)("div", { style: { fontSize: 13, lineHeight: 1.6, color: "var(--dsw-alias-label-secondary,#6b7280)" } }, t("resetBody")),
+        (0, import_react.createElement)(
+          "div",
+          { style: { display: "flex", gap: 8, marginTop: 16 } },
+          (0, import_react.createElement)("button", { style: { ...S.mini, flex: 1, height: 34, fontSize: 13 }, onClick: () => setDialog(null) }, t("cancel")),
+          (0, import_react.createElement)("button", { style: { ...S.primary, flex: 1, background: "var(--dsw-alias-state-error-primary,#dc2626)" }, onClick: async () => {
+            setDialog(null);
+            try {
+              setSt(redactStatus(await call(RELAY_ENDPOINTS.relayReset, { confirm: true })));
+              setCfgEdit(null);
+              showToast("\u2713");
+            } catch (e) {
+              setError(e.message);
+            }
+          } }, t("confirm"))
+        )
+      )
+    ) : null,
+    toast ? (0, import_react.createElement)("div", { style: { position: "fixed", left: "50%", top: "50%", transform: "translate(-50%,-50%)", zIndex: 10001, background: "rgba(17,24,39,.92)", color: "#fff", borderRadius: 8, padding: "8px 14px", fontSize: 13 } }, toast) : null
+  );
 }
 function apply(ctx) {
   if (ctx?.connection) {
@@ -501,7 +527,7 @@ function apply(ctx) {
   } catch {
   }
   ctx.slots.inject("settings.section", () => ctx.slots.register(
-    { name: "settings.section", id: "dsh-relay", order: 2, label: () => t("section"), inject: () => ({ rpcCall, t }) },
+    { name: "settings.section", id: "dsh-relay", order: 2, label: () => t("appTitle"), inject: () => ({ rpcCall, t }) },
     RelaySettingsTab
   ));
 }

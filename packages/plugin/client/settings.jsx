@@ -189,46 +189,51 @@ function RelaySettingsTab({ rpcCall, t }) {
 
   const wanOn = st?.relayRunning === true;
   const wanConfigured = Boolean(cfg.url);
+  const wanCfgForm = h('div', null,
+    h('div', { style: { fontWeight: 600, fontSize: 13, marginBottom: 8 } }, t('cfgTitle')),
+    h('div', { style: S.field }, t('cfgStep1')),
+    h('input', { style: S.input, placeholder: t('serverPlaceholder'), value: cfgEdit?.url ?? '', autoFocus: true,
+      onChange: (e) => setCfgEdit((c) => ({ ...c, url: e.target.value.trim() })) }),
+    h('div', { style: { ...S.field, marginTop: 10 } }, t('cfgStep2')),
+    h('input', { style: { ...S.input, fontFamily: 'ui-monospace,Menlo,monospace' }, type: 'password', placeholder: t('tokenPlaceholder'), value: cfgEdit?.token ?? '',
+      onChange: (e) => setCfgEdit((c) => ({ ...c, token: e.target.value.trim() })) }),
+    h('div', { style: { display: 'flex', gap: 8, marginTop: 12 } },
+      h('button', { style: S.primary, disabled: busy, onClick: () => saveCfg(true) }, busy ? t('opening') : t('cfgSave'))));
+
+  const wanHead = h('div', { style: { display: 'flex', alignItems: 'center', justifyContent: 'space-between', flexWrap: 'wrap', gap: 6 } },
+    h('div', null,
+      h('div', { style: { ...S.field, fontWeight: 600 } }, t('cfgCurrent')),
+      h('div', { style: S.url }, cfg.url || '—')),
+    h('button', { style: S.mini, onClick: () => setCfgEdit({ url: cfg.url ?? '', token: '', err: null }) }, t('cfgEdit')));
+
+  const wanEditForm = h('div', { style: { marginTop: 10, paddingTop: 10, borderTop: '1px solid var(--dsw-alias-border-l2,#e5e7eb)' } },
+    h('div', { style: S.field }, t('cfgStep1')),
+    h('input', { style: S.input, value: cfgEdit?.url ?? '', onChange: (e) => setCfgEdit((c) => ({ ...c, url: e.target.value.trim() })) }),
+    h('div', { style: { ...S.field, marginTop: 8 } }, t('cfgStep2')),
+    h('input', { style: { ...S.input, fontFamily: 'ui-monospace,Menlo,monospace' }, type: 'password', placeholder: cfg.tokenSet ? '••••••••' : t('tokenPlaceholder'), value: cfgEdit?.token ?? '', onChange: (e) => setCfgEdit((c) => ({ ...c, token: e.target.value.trim() })) }),
+    h('div', { style: { display: 'flex', gap: 8, marginTop: 10, alignItems: 'center' } },
+      h('button', { style: S.mini, onClick: () => saveCfg(false) }, t('cfgSaveOnly')),
+      h('button', { style: S.mini, onClick: () => setCfgEdit(null) }, t('cancel')),
+      cfgEdit?.err ? errOf(cfgEdit.err) : null));
+
+  const wanStart = h('div', { style: { marginTop: 12 } },
+    h('div', { style: S.muted }, t('wanOffHint')),
+    h('button', { style: { ...S.primary, marginTop: 8 }, disabled: busy, onClick: () => apply(() => call(RELAY_ENDPOINTS.relayStart, { confirm: true })) }, busy ? t('opening') : t('openRelay')));
+
+  const wanQr = h('div', { style: { ...S.grid2, marginTop: 12 } },
+    h('img', { src: st.relayQr, alt: 'QR', style: S.qr }),
+    h('div', null,
+      h('div', { style: S.url }, st.relayUrl),
+      h('div', { style: { ...S.muted, margin: '4px 0 10px' } }, t('qrHintWan')),
+      h('button', { style: S.mini, onClick: () => copy(st.relayUrl) }, t('copy')),
+      rs.server?.phone !== undefined ? h('div', { style: { ...S.muted, marginTop: 10 } }, tf('nasStats', { phone: rs.server.phone, idle: rs.server.idle ?? '—' })) : null,
+      pinBlock('public', st.accessToken, st.publicPinCustom, t('pinDesc'))));
+
   const wanBlock = h('div', { style: S.card },
-    !wanOn && !wanConfigured
-      ? h('div', null,
-        h('div', { style: { fontWeight: 600, fontSize: 13, marginBottom: 8 } }, t('cfgTitle')),
-        h('div', { style: S.field }, t('cfgStep1')),
-        h('input', { style: S.input, placeholder: t('serverPlaceholder'), value: cfgEdit?.url ?? '', autoFocus: true,
-          onChange: (e) => setCfgEdit((c) => ({ ...c, url: e.target.value.trim() })) }),
-        h('div', { style: { ...S.field, marginTop: 10 } }, t('cfgStep2')),
-        h('input', { style: { ...S.input, fontFamily: 'ui-monospace,Menlo,monospace' }, type: 'password', placeholder: t('tokenPlaceholder'), value: cfgEdit?.token ?? '',
-          onChange: (e) => setCfgEdit((c) => ({ ...c, token: e.target.value.trim() })) }),
-        h('div', { style: { display: 'flex', gap: 8, marginTop: 12 } },
-          h('button', { style: S.primary, disabled: busy, onClick: () => saveCfg(true) }, busy ? t('opening') : t('cfgSave'))))
-      : h('div', null,
-        h('div', { style: { display: 'flex', alignItems: 'center', justifyContent: 'space-between', flexWrap: 'wrap', gap: 6 } },
-          h('div', null,
-            h('div', { style: { ...S.field, fontWeight: 600 } }, t('cfgCurrent')),
-            h('div', { style: S.url }, cfg.url || '—')),
-          h('button', { style: S.mini, onClick: () => setCfgEdit({ url: cfg.url ?? '', token: '', err: null }) }, t('cfgEdit'))),
-        cfgEdit
-          ? h('div', { style: { marginTop: 10, paddingTop: 10, borderTop: '1px solid var(--dsw-alias-border-l2,#e5e7eb)' } },
-            h('div', { style: S.field }, t('cfgStep1')),
-            h('input', { style: S.input, value: cfgEdit.url, autoFocus: true, onChange: (e) => setCfgEdit((c) => ({ ...c, url: e.target.value.trim() })) }),
-            h('div', { style: { ...S.field, marginTop: 8 } }, t('cfgStep2')),
-            h('input', { style: { ...S.input, fontFamily: 'ui-monospace,Menlo,monospace' }, type: 'password', placeholder: cfg.tokenSet ? '••••••••' : t('tokenPlaceholder'), value: cfgEdit.token, onChange: (e) => setCfgEdit((c) => ({ ...c, token: e.target.value.trim() })) }),
-            h('div', { style: { display: 'flex', gap: 8, marginTop: 10, alignItems: 'center' } },
-              h('button', { style: S.mini, onClick: () => saveCfg(false) }, t('cfgSaveOnly')),
-              h('button', { style: S.mini, onClick: () => setCfgEdit(null) }, t('cancel')),
-              cfgEdit.err ? errOf(cfgEdit.err) : null))
-          : null,
-        !wanOn ? h('div', { style: { marginTop: 12 } },
-          h('div', { style: S.muted }, t('wanOffHint')),
-          h('button', { style: { ...S.primary, marginTop: 8 }, disabled: busy, onClick: () => apply(() => call(RELAY_ENDPOINTS.relayStart, { confirm: true })) }, busy ? t('opening') : t('openRelay'))) : null,
-        wanOn && st?.relayUrl ? h('div', { style: { ...S.grid2, marginTop: 12 } },
-          h('img', { src: st.relayQr, alt: 'QR', style: S.qr }),
-          h('div', null,
-            h('div', { style: S.url }, st.relayUrl),
-            h('div', { style: { ...S.muted, margin: '4px 0 10px' } }, t('qrHintWan')),
-            h('button', { style: S.mini, onClick: () => copy(st.relayUrl) }, t('copy')),
-            rs.server?.phone !== undefined ? h('div', { style: { ...S.muted, marginTop: 10 } }, tf('nasStats', { phone: rs.server.phone, idle: rs.server.idle ?? '—' })) : null,
-            pinBlock('public', st.accessToken, st.publicPinCustom, t('pinDesc'))) : null));
+    !wanOn && !wanConfigured ? wanCfgForm : wanHead,
+    cfgEdit ? wanEditForm : null,
+    !wanOn ? wanStart : null,
+    wanOn ? wanQr : null);
 
   const lanBlock = h('div', { style: S.card },
     st?.lanEnabled === false
