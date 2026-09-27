@@ -1,0 +1,7 @@
+[
+  {
+    "id": "home",
+    "token": "replace-with-openssl-rand-hex-24",
+    "domain": "dsh.example.com"
+  }
+]

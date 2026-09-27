@@ -65,6 +65,29 @@ DSH 设置页 → DSH Relay：
 - Token：步骤 2 生成的值
 - 开启 → 状态显示「已连接 NAS」后扫码即可
 
+## 5. 多客户端（可选）：一个服务端带多台电脑
+
+一个服务端可以同时服务任意多台 DSH（协议 v1.1 多租户）。每个客户端一条独立 token，
+手机侧按域名路由：
+
+```bash
+cd packages/server
+cp clients.json.example clients.json
+# 加第一个客户端（token 会打印出来，填到对应电脑的插件设置页）：
+docker compose run --rm relay node src/server.mjs add-client /data/clients.json home dsh.example.com
+# 再加一台：
+docker compose run --rm relay node src/server.mjs add-client /data/clients.json office office.example.com
+docker compose restart relay
+```
+
+规则：
+
+- 每个客户端配一个 `domain`，各域名都解析到家里 IP；手机访问哪个域名就进哪台电脑
+- 保留一条**不带 domain** 的客户端作为默认（裸 IP 访问落到它）；
+  全部都带 domain 时，未匹配域名返回 421
+- 客户端之间完全隔离：token 不同、连接池不同，拿到 A 的 token 碰不到 B
+- 查看现状：`docker compose run --rm relay node src/server.mjs list-clients /data/clients.json`
+
 ## 排障
 
 | 症状 | 检查 |

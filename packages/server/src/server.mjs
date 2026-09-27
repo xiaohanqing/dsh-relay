@@ -4,13 +4,17 @@
 //   1. 手机流量：TLS 解密后的原始字节流 → 经 data 连接池透传给插件（纯字节搬运，零解析）
 //   2. 插件通道：/__relay/ctl（控制 WS）+ /__relay/data（数据 WS 池），token 鉴权
 //
+// 多租户（协议 v2）：服务端持有客户端注册表 [{id, token, domain}]，每个客户端一条
+// 独立 token、独立的控制连接与数据池。插件按 token 归属；手机流量按 Host 头路由到
+// 对应客户端，Host 不匹配任何 domain 时落到无 domain 的默认客户端（裸 IP 兼容）。
+//
 // 所有状态都封装在 createRelayServer() 闭包内（支持同进程多实例，测试用）。
 
 import tls from 'node:tls';
 import http from 'node:http';
 import crypto from 'node:crypto';
 import net from 'node:net';
-import { readFileSync } from 'node:fs';
+import { readFileSync, writeFileSync, existsSync } from 'node:fs';
 import { WebSocketServer, WebSocket } from 'ws';
 
 const PKG_VERSION = (() => {
@@ -23,7 +27,9 @@ const PKG_VERSION = (() => {
 const defaults = {
   port: Number(process.env.RELAY_PORT ?? 8443),
   host: process.env.RELAY_HOST ?? '0.0.0.0',
-  token: (process.env.RELAY_TOKEN ?? '').trim(),
+  clients: null, // 直接注入的注册表 [{id, token, domain?}]
+  clientsFile: (process.env.RELAY_CLIENTS_FILE ?? '').trim(),
+  token: (process.env.RELAY_TOKEN ?? '').trim(), // 向后兼容：单客户端部署
   tokenFile: (process.env.RELAY_TOKEN_FILE ?? '').trim(),
   tlsCert: (process.env.RELAY_TLS_CERT ?? '').trim(),
   tlsKey: (process.env.RELAY_TLS_KEY ?? '').trim(),
@@ -39,25 +45,65 @@ function tokenEqual(a, b) {
   return crypto.timingSafeEqual(ba, bb);
 }
 
-export function createRelayServer(overrides = {}) {
-  const cfg = { ...defaults, ...overrides };
+/** 解析并校验客户端注册表。返回 [{id, token, domain}]（domain 归一为小写无端口）。 */
+export function normalizeClients(raw) {
+  if (!Array.isArray(raw) || raw.length === 0) throw new Error('客户端注册表为空');
+  const seenId = new Set();
+  const seenToken = new Set();
+  const seenDomain = new Set();
+  return raw.map((c, i) => {
+    const id = String(c?.id ?? '').trim();
+    const token = String(c?.token ?? '').trim();
+    const domain = String(c?.domain ?? '').trim().toLowerCase().replace(/:\d+$/, '');
+    if (!/^[a-z0-9][a-z0-9-]{0,63}$/.test(id)) throw new Error(`clients[${i}].id 非法: "${id}"`);
+    if (token.length < 16) throw new Error(`clients[${i}].token 太短（至少 16 字符）`);
+    if (seenId.has(id)) throw new Error(`clients[${i}].id 重复: ${id}`);
+    if (seenToken.has(token)) throw new Error(`clients[${i}].token 与其他客户端重复`);
+    if (domain) {
+      if (seenDomain.has(domain)) throw new Error(`clients[${i}].domain 重复: ${domain}`);
+      seenDomain.add(domain);
+    }
+    seenId.add(id); seenToken.add(token);
+    return { id, token, domain };
+  });
+}
 
-  // ---------- token ----------
+/** 从配置装配注册表：clients > clientsFile > 单 token 兼容。 */
+function loadClients(cfg) {
+  if (Array.isArray(cfg.clients)) return normalizeClients(cfg.clients);
+  if (cfg.clientsFile) {
+    const raw = JSON.parse(readFileSync(cfg.clientsFile, 'utf8'));
+    return normalizeClients(raw.clients ?? raw);
+  }
   const token = cfg.token || (() => {
     try { return readFileSync(cfg.tokenFile, 'utf8').trim(); } catch { return ''; }
   })();
-  if (!token) throw new Error('RELAY_TOKEN (或 RELAY_TOKEN_FILE) 未设置——拒绝明文裸奔启动');
+  if (!token) throw new Error('未配置任何客户端（RELAY_CLIENTS_FILE / RELAY_TOKEN）——拒绝明文裸奔启动');
+  return normalizeClients([{ id: 'default', token }]);
+}
+
+export function createRelayServer(overrides = {}) {
+  const cfg = { ...defaults, ...overrides };
+  const registry = loadClients(cfg);
 
   // ---------- 运行状态 ----------
+  /** @type {Map<string,{id,token,domain,startedAt,connIdSeq,ctl,phoneConns,idleData}>} */
+  const sessions = new Map();
+  for (const c of registry) {
+    sessions.set(c.id, {
+      ...c,
+      startedAt: Date.now(),
+      connIdSeq: 0,
+      ctl: null,
+      /** @type {Map<number,{ws:WebSocket, peer:net.Socket}>} 已绑定的手机流 */
+      phoneConns: new Map(),
+      /** @type {Set<WebSocket>} 空闲 data 连接 */
+      idleData: new Set(),
+    });
+  }
   const state = {
     startedAt: Date.now(),
-    connIdSeq: 0,
-    httpPort: null,        // 内部 http server（插件 WS upgrade）端口
-    ctl: null,             // 当前控制连接
-    /** @type {Map<number,{ws:WebSocket, peer:net.Socket}>} 已绑定的手机流 */
-    phoneConns: new Map(),
-    /** @type {Set<WebSocket>} 空闲 data 连接 */
-    idleData: new Set(),
+    httpPort: null, // 内部 http server（插件 WS upgrade）端口
     /** @type {Set<net.Socket>} 全部入站连接（close 时统一销毁，保证快速关停） */
     inbound: new Set(),
   };
@@ -65,11 +111,38 @@ export function createRelayServer(overrides = {}) {
   function log(...args) {
     console.log(new Date().toISOString(), ...args);
   }
-  function stats() {
-    return { phone: state.phoneConns.size, idle: state.idleData.size, uptime: Math.floor((Date.now() - state.startedAt) / 1000) };
+
+  // 按域名找默认客户端（无 domain 的第一个；注册表保证最多提示一次歧义）
+  const defaultSession = () => {
+    for (const s of sessions.values()) if (!s.domain) return s;
+    return null;
+  };
+  const resolveByHost = (host) => {
+    const h = String(host ?? '').trim().toLowerCase().replace(/:\d+$/, '');
+    if (!h) return defaultSession();
+    for (const s of sessions.values()) if (s.domain && s.domain === h) return s;
+    return defaultSession();
+  };
+  const resolveByToken = (t) => {
+    for (const s of sessions.values()) if (tokenEqual(t, s.token)) return s;
+    return null;
+  };
+
+  function clientStats(s) {
+    return { id: s.id, connected: !!s.ctl, phone: s.phoneConns.size, idle: s.idleData.size };
   }
-  function ctlSend(obj) {
-    try { state.ctl?.send(JSON.stringify(obj)); } catch { /* 连接正断 */ }
+  function stats() {
+    let phone = 0; let idle = 0;
+    const clients = [];
+    for (const s of sessions.values()) {
+      const cs = clientStats(s);
+      phone += cs.phone; idle += cs.idle;
+      clients.push(cs);
+    }
+    return { phone, idle, uptime: Math.floor((Date.now() - state.startedAt) / 1000), clients };
+  }
+  function ctlSend(s, obj) {
+    try { s.ctl?.send(JSON.stringify(obj)); } catch { /* 连接正断 */ }
   }
 
   // ---------- token 失败限速（按来源 IP） ----------
@@ -95,14 +168,14 @@ export function createRelayServer(overrides = {}) {
   // ---------- 插件通道（WS） ----------
   const wss = new WebSocketServer({ noServer: true });
 
-  function onControl(ws) {
-    log('plugin control connected');
-    if (state.ctl && state.ctl.readyState === WebSocket.OPEN) {
-      try { state.ctl.close(4000, 'replaced'); } catch { /* 忽略 */ }
+  function onControl(s, ws) {
+    log(`plugin control connected (client=${s.id})`);
+    if (s.ctl && s.ctl.readyState === WebSocket.OPEN) {
+      try { s.ctl.close(4000, 'replaced'); } catch { /* 忽略 */ }
     }
-    state.ctl = ws;
-    ws.send(JSON.stringify({ type: 'hello', server: `dsh-relay-server/${PKG_VERSION}`, protocol: 1, pool: cfg.poolHint }));
-    ctlSend({ type: 'stats', ...stats() });
+    s.ctl = ws;
+    ws.send(JSON.stringify({ type: 'hello', server: `dsh-relay-server/${PKG_VERSION}`, protocol: 1, client: s.id, pool: cfg.poolHint }));
+    ctlSend(s, { type: 'stats', ...clientStats(s) });
 
     ws.on('message', (raw, isBinary) => {
       if (isBinary) return;
@@ -111,15 +184,15 @@ export function createRelayServer(overrides = {}) {
       if (msg?.type === 'ping') ws.send(JSON.stringify({ type: 'pong', t: msg.t ?? 0 }));
     });
     const drop = () => {
-      if (state.ctl === ws) state.ctl = null;
-      log('plugin control lost');
-      // 控制连接没了：已绑定手机流的对端已死，全部关闭（浏览器会自动重试）
-      for (const conn of [...state.phoneConns.values()]) {
+      if (s.ctl === ws) s.ctl = null;
+      log(`plugin control lost (client=${s.id})`);
+      // 控制连接没了：该客户端已绑定手机流的对端已死，全部关闭（浏览器会自动重试）
+      for (const conn of [...s.phoneConns.values()]) {
         try { conn.ws.close(1001, 'plugin offline'); } catch { /* 忽略 */ }
         try { conn.peer.destroy(); } catch { /* 忽略 */ }
       }
-      for (const ws2 of [...state.idleData]) { try { ws2.close(1001, 'plugin offline'); } catch { /* 忽略 */ } }
-      state.idleData.clear();
+      for (const ws2 of [...s.idleData]) { try { ws2.close(1001, 'plugin offline'); } catch { /* 忽略 */ } }
+      s.idleData.clear();
     };
     // once 守卫：close/error 对同一连接各触发一次，drop 只能执行一次
     let ctlDropped = false;
@@ -128,9 +201,9 @@ export function createRelayServer(overrides = {}) {
     ws.on('error', dropOnce);
   }
 
-  function onDataSocket(ws) {
-    state.idleData.add(ws);
-    ws.on('close', () => state.idleData.delete(ws));
+  function onDataSocket(s, ws) {
+    s.idleData.add(ws);
+    ws.on('close', () => s.idleData.delete(ws));
     ws.on('error', () => { try { ws.close(); } catch { /* 忽略 */ } });
   }
 
@@ -144,7 +217,8 @@ export function createRelayServer(overrides = {}) {
       socket.destroy();
       return;
     }
-    if (!tokenEqual(req.headers['x-relay-token'], token)) {
+    const s = resolveByToken(req.headers['x-relay-token']);
+    if (!s) {
       recordTokenFail(ip);
       log(`auth failed from ${ip} (${url})`);
       socket.write('HTTP/1.1 401 Unauthorized\r\nConnection: close\r\n\r\n');
@@ -153,9 +227,9 @@ export function createRelayServer(overrides = {}) {
     }
 
     if (url === '/__relay/ctl') {
-      wss.handleUpgrade(req, socket, head, (ws) => onControl(ws));
+      wss.handleUpgrade(req, socket, head, (ws) => onControl(s, ws));
     } else if (url === '/__relay/data') {
-      wss.handleUpgrade(req, socket, head, (ws) => onDataSocket(ws));
+      wss.handleUpgrade(req, socket, head, (ws) => onDataSocket(s, ws));
     } else {
       socket.write('HTTP/1.1 404 Not Found\r\nConnection: close\r\n\r\n');
       socket.destroy();
@@ -169,16 +243,18 @@ export function createRelayServer(overrides = {}) {
   });
   internal.on('upgrade', handleUpgrade);
 
-  // 数据面统计推送
-  const statsTimer = setInterval(() => ctlSend({ type: 'stats', ...stats() }), 10_000);
+  // 数据面统计推送（每客户端推自己的）
+  const statsTimer = setInterval(() => {
+    for (const s of sessions.values()) ctlSend(s, { type: 'stats', ...clientStats(s) });
+  }, 10_000);
   statsTimer.unref?.();
 
   // ---------- 数据面 ----------
-  async function bindDataConn() {
+  async function bindDataConn(s) {
     const take = () => {
-      const ws = state.idleData.values().next().value;
+      const ws = s.idleData.values().next().value;
       if (!ws) return null;
-      state.idleData.delete(ws);
+      s.idleData.delete(ws);
       return ws;
     };
     let ws = take();
@@ -193,14 +269,14 @@ export function createRelayServer(overrides = {}) {
   }
 
   /** 手机流量入口：原始字节流整体透传（head 为嗅探期间缓存的首包）。 */
-  async function pipePhoneSocket(socket, head) {
-    const connId = ++state.connIdSeq;
-    const ws = await bindDataConn();
+  async function pipePhoneSocket(socket, head, s) {
+    const connId = ++s.connIdSeq;
+    const ws = await bindDataConn(s);
     if (!ws || ws.readyState !== WebSocket.OPEN) {
       socket.end('HTTP/1.1 503 Service Unavailable\r\nConnection: close\r\n\r\nNo tunnel available\r\n');
       return;
     }
-    state.phoneConns.set(connId, { ws, peer: socket });
+    s.phoneConns.set(connId, { ws, peer: socket });
     ws.send(JSON.stringify({ bind: connId }));
     if (head?.length) ws.send(head);
 
@@ -214,7 +290,7 @@ export function createRelayServer(overrides = {}) {
     };
     socket.on('data', onPhoneData);
     const teardown = () => {
-      state.phoneConns.delete(connId);
+      s.phoneConns.delete(connId);
       socket.off('data', onPhoneData);
       try { ws.close(); } catch { /* 忽略 */ }
       try { socket.destroy(); } catch { /* 忽略 */ }
@@ -235,7 +311,7 @@ export function createRelayServer(overrides = {}) {
     socket.on('close', () => state.inbound.delete(socket));
     let buf = Buffer.alloc(0);
     let done = false;
-    const finish = (route) => {
+    const finish = (route, host) => {
       if (done) return;
       done = true;
       clearTimeout(timer);
@@ -256,16 +332,21 @@ export function createRelayServer(overrides = {}) {
         up.on('error', teardown);
         up.on('close', teardown);
       } else if (route === 'status') {
-        const body = JSON.stringify({ ok: true, server: `dsh-relay-server/${PKG_VERSION}` });
+        const body = JSON.stringify({ ok: true, server: `dsh-relay-server/${PKG_VERSION}`, ...stats() });
         socket.end(`HTTP/1.1 200 OK\r\ncontent-type: application/json\r\ncontent-length: ${Buffer.byteLength(body)}\r\nconnection: close\r\n\r\n${body}`);
       } else {
-        // 手机流量：整条字节流透传给插件
-        void pipePhoneSocket(socket, buf);
+        // 手机流量：按 Host 路由到对应客户端
+        const s = resolveByHost(host);
+        if (!s) {
+          socket.end('HTTP/1.1 421 Misdirected Request\r\nConnection: close\r\n\r\nUnknown relay host\r\n');
+          return;
+        }
+        void pipePhoneSocket(socket, buf, s);
       }
     };
     const onData = (chunk) => {
       buf = Buffer.concat([buf, chunk]);
-      if (buf.length > SNIFF_MAX) return finish('phone');
+      if (buf.length > SNIFF_MAX) return finish('phone', '');
       const idx = buf.indexOf('\r\n\r\n');
       if (idx < 0) return;
       const head = buf.subarray(0, idx).toString('latin1');
@@ -274,13 +355,14 @@ export function createRelayServer(overrides = {}) {
       const pathOnly = (m?.[2] ?? '').split('?')[0];
       if (pathOnly === '/__relay/status') return finish('status');
       if (pathOnly.startsWith('/__relay/')) return finish('relay');
-      return finish('phone');
+      const hm = /^host:[ \t]*(.+)$/im.exec(head);
+      return finish('phone', hm?.[1] ?? '');
     };
     const onGone = () => finish('gone');
     socket.on('data', onData);
     socket.on('close', onGone);
     socket.on('error', onGone);
-    const timer = setTimeout(() => finish('phone'), SNIFF_TIMEOUT_MS);
+    const timer = setTimeout(() => finish('phone', ''), SNIFF_TIMEOUT_MS);
     timer.unref?.();
   }
 
@@ -310,28 +392,80 @@ export function createRelayServer(overrides = {}) {
 
   return {
     server,
-    token,
     insecure: !tlsOpts,
     listen,
     stats,
+    /** 客户端注册表（token 已脱敏为前 6 位，仅日志/展示用） */
+    clients: registry.map((c) => ({ id: c.id, domain: c.domain, tokenHint: `${c.token.slice(0, 6)}…` })),
     close: async () => {
       for (const s of [...state.inbound]) { try { s.destroy(); } catch { /* 忽略 */ } }
       clearInterval(statsTimer);
       await new Promise((r) => server.close(r));
       await new Promise((r) => internal.close(r));
     },
-    _internals: { state, sniffAndRoute },
+    _internals: { state, sessions, sniffAndRoute },
   };
 }
 
-// CLI 直接运行：node src/server.mjs
+// ---------- CLI ----------
+const CLI_USAGE = `用法:
+  node src/server.mjs                       启动服务（读环境变量）
+  node src/server.mjs add-client <file> <id> [domain]
+                                            向注册表文件添加客户端并生成 token
+  node src/server.mjs list-clients <file>   列出注册表里的客户端`;
+
+function readRegistryFile(file) {
+  if (!existsSync(file)) return { clients: [] };
+  const raw = JSON.parse(readFileSync(file, 'utf8'));
+  return { clients: Array.isArray(raw) ? raw : (raw.clients ?? []) };
+}
+
+async function cli(args) {
+  const [cmd, ...rest] = args;
+  if (cmd === 'add-client') {
+    const [file, id, domain] = rest;
+    if (!file || !id) { console.error(CLI_USAGE); process.exit(1); }
+    const reg = readRegistryFile(file);
+    const token = crypto.randomBytes(24).toString('hex');
+    reg.clients.push({ id, token, ...(domain ? { domain } : {}) });
+    normalizeClients(reg.clients); // 先校验再落盘
+    writeFileSync(file, `${JSON.stringify(reg, null, 2)}\n`, { mode: 0o600 });
+    console.log(`client "${id}" added to ${file}`);
+    console.log(`  token:  ${token}`);
+    if (domain) console.log(`  domain: ${domain}`);
+    return;
+  }
+  if (cmd === 'list-clients') {
+    const [file] = rest;
+    if (!file) { console.error(CLI_USAGE); process.exit(1); }
+    const reg = readRegistryFile(file);
+    const list = normalizeClients(reg.clients);
+    for (const c of list) {
+      console.log(`${c.id.padEnd(20)} domain=${c.domain || '(default 裸IP)'} token=${c.token.slice(0, 6)}…`);
+    }
+    if (list.length === 0) console.log('(empty)');
+    return;
+  }
+  console.error(CLI_USAGE);
+  process.exit(1);
+}
+
+// CLI 直接运行：node src/server.mjs [start] | add-client | list-clients
 if (process.argv[1] && import.meta.url === (await import('node:url')).pathToFileURL(process.argv[1]).href) {
-  const relay = createRelayServer();
-  relay.listen().then((addr) => {
-    console.log(new Date().toISOString(), `dsh-relay-server ${PKG_VERSION} listening on ${JSON.stringify(addr)} (${relay.insecure ? 'INSECURE dev mode — set RELAY_TLS_CERT/RELAY_TLS_KEY' : 'TLS'})`);
-    console.log(new Date().toISOString(), `plugin connect: ${relay.insecure ? 'ws' : 'wss'}://<host>:${addr.port}/__relay/ctl`);
-  }).catch((err) => {
-    console.error('failed to listen:', err.message);
-    process.exit(1);
-  });
+  const args = process.argv.slice(2);
+  if (args.length > 0 && args[0] !== 'start') {
+    await cli(args);
+  } else {
+    const relay = createRelayServer();
+    relay.listen().then((addr) => {
+      log(`dsh-relay-server ${PKG_VERSION} listening on ${JSON.stringify(addr)} (${relay.insecure ? 'INSECURE dev mode — set RELAY_TLS_CERT/RELAY_TLS_KEY' : 'TLS'})`);
+      for (const c of relay.clients) {
+        log(`  client ${c.id} domain=${c.domain || '(default 裸IP)'} token=${c.tokenHint}`);
+      }
+      log(`plugin connect: ${relay.insecure ? 'ws' : 'wss'}://<host>:${addr.port}/__relay/ctl`);
+    }).catch((err) => {
+      console.error('failed to listen:', err.message);
+      process.exit(1);
+    });
+  }
 }
