@@ -185,6 +185,13 @@ function RelaySettingsTab({ rpcCall, t }) {
   const savePin = async (which) => { try { setSt(redactStatus(await call(RELAY_ENDPOINTS.pinSetCustom, { which, value: pinEdit?.value ?? '' }))); setPinEdit(null); } catch (e) { setPinEdit((c) => ({ ...c, err: e.message })); } };
   // 密码默认掩码显示，点「显示」才可见（防止旁人屏幕偷窥/截图泄露）
   const [pinReveal, setPinReveal] = useState({});
+  // 服务端地址同样默认掩码：点击文本本体切换显示（无独立按钮）
+  const [urlReveal, setUrlReveal] = useState(false);
+  const maskableUrl = (url) => h('div', {
+    style: { ...S.url, cursor: 'pointer', userSelect: 'none' },
+    title: urlReveal ? t('hide') : t('reveal'),
+    onClick: () => setUrlReveal((v) => !v),
+  }, url ? (urlReveal ? url : String(url).replace(/^(https?:\/\/).+$/i, '$1••••••••••••')) : '—');
   const pinBlock = (which, value, custom, desc) => h('div', { style: { marginTop: 10 } },
     h('div', { style: { display: 'flex', alignItems: 'baseline', justifyContent: 'space-between' } },
       h('span', { style: { ...S.field, fontWeight: 600 } }, t('pinTitle')),
@@ -259,7 +266,7 @@ function RelaySettingsTab({ rpcCall, t }) {
   const wanHead = h('div', { style: { display: 'flex', alignItems: 'center', justifyContent: 'space-between', flexWrap: 'wrap', gap: 6 } },
     h('div', null,
       h('div', { style: { ...S.field, fontWeight: 600 } }, t('cfgCurrent')),
-      h('div', { style: S.url }, cfg.url || '—')),
+      maskableUrl(cfg.url)),
     h('button', { style: S.mini, onClick: () => setCfgEdit({ url: cfg.url ?? '', token: '', err: null }) }, t('cfgEdit')));
 
   const wanEditForm = h('div', { style: { marginTop: 10, paddingTop: 10, borderTop: '1px solid var(--dsw-alias-border-l2,#e5e7eb)' } },
@@ -281,10 +288,10 @@ function RelaySettingsTab({ rpcCall, t }) {
     wanQr = h('div', { style: { ...S.grid2, marginTop: 12 } },
       h('img', { src: st.relayQr, alt: 'QR', style: S.qr }),
       h('div', null,
-        h('div', { style: S.url }, st.relayUrl),
+        maskableUrl(st.relayUrl),
         h('div', { style: { ...S.muted, margin: '4px 0 10px' } }, t('qrHintWan')),
         h('button', { style: S.mini, onClick: () => copy(st.relayUrl) }, t('copy')),
-        rs.server?.phone !== undefined ? h('div', { style: { ...S.muted, marginTop: 10 } }, tf('nasStats', { phone: rs.server.phone, idle: rs.server.idle ?? '—' })) : null,
+        rs.server?.phone !== undefined ? h('div', { style: { ...S.muted, marginTop: 10 } }, tf('serverStats', { phone: rs.server.phone, idle: rs.server.idle ?? '—' })) : null,
         pinBlock('public', st.accessToken, st.publicPinCustom, t('pinDesc'))));
   }
 

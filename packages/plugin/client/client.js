@@ -289,6 +289,12 @@ function RelaySettingsTab({ rpcCall, t }) {
     }
   };
   const [pinReveal, setPinReveal] = (0, import_react.useState)({});
+  const [urlReveal, setUrlReveal] = (0, import_react.useState)(false);
+  const maskableUrl = (url) => (0, import_react.createElement)("div", {
+    style: { ...S.url, cursor: "pointer", userSelect: "none" },
+    title: urlReveal ? t("hide") : t("reveal"),
+    onClick: () => setUrlReveal((v) => !v)
+  }, url ? urlReveal ? url : String(url).replace(/^(https?:\/\/).+$/i, "$1\u2022\u2022\u2022\u2022\u2022\u2022\u2022\u2022\u2022\u2022\u2022\u2022") : "\u2014");
   const pinBlock = (which, value, custom, desc) => (0, import_react.createElement)(
     "div",
     { style: { marginTop: 10 } },
@@ -418,7 +424,7 @@ function RelaySettingsTab({ rpcCall, t }) {
       "div",
       null,
       (0, import_react.createElement)("div", { style: { ...S.field, fontWeight: 600 } }, t("cfgCurrent")),
-      (0, import_react.createElement)("div", { style: S.url }, cfg.url || "\u2014")
+      maskableUrl(cfg.url)
     ),
     (0, import_react.createElement)("button", { style: S.mini, onClick: () => setCfgEdit({ url: cfg.url ?? "", token: "", err: null }) }, t("cfgEdit"))
   );
@@ -452,10 +458,10 @@ function RelaySettingsTab({ rpcCall, t }) {
       (0, import_react.createElement)(
         "div",
         null,
-        (0, import_react.createElement)("div", { style: S.url }, st.relayUrl),
+        maskableUrl(st.relayUrl),
         (0, import_react.createElement)("div", { style: { ...S.muted, margin: "4px 0 10px" } }, t("qrHintWan")),
         (0, import_react.createElement)("button", { style: S.mini, onClick: () => copy(st.relayUrl) }, t("copy")),
-        rs.server?.phone !== void 0 ? (0, import_react.createElement)("div", { style: { ...S.muted, marginTop: 10 } }, tf("nasStats", { phone: rs.server.phone, idle: rs.server.idle ?? "\u2014" })) : null,
+        rs.server?.phone !== void 0 ? (0, import_react.createElement)("div", { style: { ...S.muted, marginTop: 10 } }, tf("serverStats", { phone: rs.server.phone, idle: rs.server.idle ?? "\u2014" })) : null,
         pinBlock("public", st.accessToken, st.publicPinCustom, t("pinDesc"))
       )
     );
