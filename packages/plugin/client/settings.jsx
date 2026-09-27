@@ -220,14 +220,17 @@ function RelaySettingsTab({ rpcCall, t }) {
     h('div', { style: S.muted }, t('wanOffHint')),
     h('button', { style: { ...S.primary, marginTop: 8 }, disabled: busy, onClick: () => apply(() => call(RELAY_ENDPOINTS.relayStart, { confirm: true })) }, busy ? t('opening') : t('openRelay')));
 
-  const wanQr = h('div', { style: { ...S.grid2, marginTop: 12 } },
-    h('img', { src: st.relayQr, alt: 'QR', style: S.qr }),
-    h('div', null,
-      h('div', { style: S.url }, st.relayUrl),
-      h('div', { style: { ...S.muted, margin: '4px 0 10px' } }, t('qrHintWan')),
-      h('button', { style: S.mini, onClick: () => copy(st.relayUrl) }, t('copy')),
-      rs.server?.phone !== undefined ? h('div', { style: { ...S.muted, marginTop: 10 } }, tf('nasStats', { phone: rs.server.phone, idle: rs.server.idle ?? '—' })) : null,
-      pinBlock('public', st.accessToken, st.publicPinCustom, t('pinDesc'))));
+  let wanQr = null;
+  if (wanOn && st?.relayUrl) {
+    wanQr = h('div', { style: { ...S.grid2, marginTop: 12 } },
+      h('img', { src: st.relayQr, alt: 'QR', style: S.qr }),
+      h('div', null,
+        h('div', { style: S.url }, st.relayUrl),
+        h('div', { style: { ...S.muted, margin: '4px 0 10px' } }, t('qrHintWan')),
+        h('button', { style: S.mini, onClick: () => copy(st.relayUrl) }, t('copy')),
+        rs.server?.phone !== undefined ? h('div', { style: { ...S.muted, marginTop: 10 } }, tf('nasStats', { phone: rs.server.phone, idle: rs.server.idle ?? '—' })) : null,
+        pinBlock('public', st.accessToken, st.publicPinCustom, t('pinDesc'))));
+  }
 
   const wanBlock = h('div', { style: S.card },
     !wanOn && !wanConfigured ? wanCfgForm : wanHead,

@@ -367,20 +367,23 @@ function RelaySettingsTab({ rpcCall, t }) {
     (0, import_react.createElement)("div", { style: S.muted }, t("wanOffHint")),
     (0, import_react.createElement)("button", { style: { ...S.primary, marginTop: 8 }, disabled: busy, onClick: () => apply2(() => call(RELAY_ENDPOINTS.relayStart, { confirm: true })) }, busy ? t("opening") : t("openRelay"))
   );
-  const wanQr = (0, import_react.createElement)(
-    "div",
-    { style: { ...S.grid2, marginTop: 12 } },
-    (0, import_react.createElement)("img", { src: st.relayQr, alt: "QR", style: S.qr }),
-    (0, import_react.createElement)(
+  let wanQr = null;
+  if (wanOn && st?.relayUrl) {
+    wanQr = (0, import_react.createElement)(
       "div",
-      null,
-      (0, import_react.createElement)("div", { style: S.url }, st.relayUrl),
-      (0, import_react.createElement)("div", { style: { ...S.muted, margin: "4px 0 10px" } }, t("qrHintWan")),
-      (0, import_react.createElement)("button", { style: S.mini, onClick: () => copy(st.relayUrl) }, t("copy")),
-      rs.server?.phone !== void 0 ? (0, import_react.createElement)("div", { style: { ...S.muted, marginTop: 10 } }, tf("nasStats", { phone: rs.server.phone, idle: rs.server.idle ?? "\u2014" })) : null,
-      pinBlock("public", st.accessToken, st.publicPinCustom, t("pinDesc"))
-    )
-  );
+      { style: { ...S.grid2, marginTop: 12 } },
+      (0, import_react.createElement)("img", { src: st.relayQr, alt: "QR", style: S.qr }),
+      (0, import_react.createElement)(
+        "div",
+        null,
+        (0, import_react.createElement)("div", { style: S.url }, st.relayUrl),
+        (0, import_react.createElement)("div", { style: { ...S.muted, margin: "4px 0 10px" } }, t("qrHintWan")),
+        (0, import_react.createElement)("button", { style: S.mini, onClick: () => copy(st.relayUrl) }, t("copy")),
+        rs.server?.phone !== void 0 ? (0, import_react.createElement)("div", { style: { ...S.muted, marginTop: 10 } }, tf("nasStats", { phone: rs.server.phone, idle: rs.server.idle ?? "\u2014" })) : null,
+        pinBlock("public", st.accessToken, st.publicPinCustom, t("pinDesc"))
+      )
+    );
+  }
   const wanBlock = (0, import_react.createElement)(
     "div",
     { style: S.card },
