@@ -21,6 +21,10 @@ writeFileSync(`${HOME}/dsh-relay/settings.json`, JSON.stringify({
 }), 'utf8');
 writeFileSync(`${HOME}/dsh-relay/relay-auto.json`, JSON.stringify({ at: Date.now() }), 'utf8');
 
+// 1b. 关键：settings.mjs 读 process.env.DSH_HOME（不是注入的 home 参数）——
+// 必须在 import 插件源码之前设置，否则桩配置被短路、测试测了个寂寞（假绿）
+process.env.DSH_HOME = HOME;
+
 // 2. 计数 WebSocket：统计连接尝试速率
 let attempts = 0;
 let attemptsThisSecond = 0;
