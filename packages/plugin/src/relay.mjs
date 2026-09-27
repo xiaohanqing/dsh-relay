@@ -72,7 +72,16 @@ export class RelayClient {
     this.ctl = null;
     /** @type {Set<WebSocket>} */
     this.pool = new Set();
+    // 【绝对红线】重连必须有界（2026-09-27 OOM 事故教训）：
+    //   1. 每条连接的 error+close 会各触发一次 drop —— 必须 once 守卫，一次失败只调度一次重连；
+    //   2. 退避计数挂在池级（dataAttempt/ctlAttempt），不随新建连接对象重置；
+    //   3. in-flight 连接数封顶 POOL_SIZE，杜绝风暴。
+    this.dataInflight = 0;
+    this.dataAttempt = 0;
     this.ctlAttempt = 0;
+    /** @type {Set<import('node:timers').Timeout>} 待触发的重连定时器（stop 时全部撤销） */
+    this.retryTimers = new Set();
+    this.ctlTimer = null;
     this.ctlTimer = null;
     this.pingTimer = null;
     this.lastPong = 0;
@@ -102,6 +111,8 @@ export class RelayClient {
     }
     this.stopped = false;
     this.attempts = 0;
+    this.dataAttempt = 0;
+    this.dataInflight = 0;
     this.startedAt = Date.now();
     this.phase = 'connecting';
     this._emit({ phase: 'connecting', detail: '连接 NAS 中继… | connecting to relay…', attempts: 0, nextRetryAt: null });
@@ -113,6 +124,9 @@ export class RelayClient {
     this.stopped = true;
     clearTimeout(this.ctlTimer);
     this.ctlTimer = null;
+    // 撤销所有待触发的重连定时器（不撤销的话 stop 后还会漏出几条连接）
+    for (const t of this.retryTimers) clearTimeout(t);
+    this.retryTimers.clear();
     clearInterval(this.pingTimer);
     this.pingTimer = null;
     try { this.ctl?.close(1000, 'stopped'); } catch { /* 忽略 */ }
@@ -170,8 +184,11 @@ export class RelayClient {
       if (msg.type === 'hello' || msg.type === 'stats') this._emit({ server: this.server });
     });
     const drop = (err) => this._ctlFail(err ?? new Error('control connection lost'));
-    ws.on('close', () => drop());
-    ws.on('error', drop);
+    // once 守卫：close 与 error 对同一连接可能各触发一次，_ctlFail 只能跑一次
+    let ctlDead = false;
+    const dropOnce = (err) => { if (ctlDead) return; ctlDead = true; drop(err); };
+    ws.on('close', () => dropOnce());
+    ws.on('error', dropOnce);
   }
 
   _ctlFail(err) {
@@ -196,17 +213,37 @@ export class RelayClient {
   }
 
   // ---------- 数据连接池 ----------
+  _scheduleDataConnect(delay) {
+    if (this.stopped) return;
+    const t = setTimeout(() => {
+      this.retryTimers.delete(t);
+      this._connectData();
+    }, delay);
+    t.unref?.();
+    this.retryTimers.add(t);
+  }
+
   _connectData() {
     if (this.stopped) return;
+    // in-flight 封顶：杜绝任何形式的连接风暴（红线 #1/#3）
+    if (this.dataInflight >= POOL_SIZE) return;
+    this.dataInflight++;
     let ws;
     try {
       ws = new this.WS(`${this.base}/__relay/data`, { headers: { 'x-relay-token': this.token } });
     } catch {
-      this._retryData(null, 1);
+      this.dataInflight--;
+      this.dataAttempt++;
+      this._scheduleDataConnect(backoffMs(this.dataAttempt, DATA_BACKOFF_MAX_MS));
       return;
     }
     this.pool.add(ws);
-    ws._relayAttempt = 0;
+
+    ws.on('open', () => {
+      // 成功即复位池级退避（目标恢复，可以全速补池）
+      this.dataAttempt = 0;
+      this.dataInflight--;
+    });
 
     ws.on('message', (raw, isBinary) => {
       // 首帧文本 = 绑定帧 {bind: connId}；其后二进制 = 手机字节
@@ -228,21 +265,21 @@ export class RelayClient {
       }
     });
 
+    // once 守卫：error 与 close 各触发一次，drop 逻辑只能跑一次（红线 #1）
+    let dead = false;
     const drop = () => {
+      if (dead) return;
+      dead = true;
       this.pool.delete(ws);
       if (ws._local) { try { ws._local.destroy(); } catch { /* 忽略 */ } ws._local = null; }
+      if (this.stopped) return;
       if (ws._consumed) return; // 绑定时已补过新连接
-      this._retryData(ws, (ws._relayAttempt ?? 0) + 1);
+      // 退避挂在池级计数上：未成功 open 的失败逐次升级（封顶 10s），成功后复位
+      this.dataAttempt++;
+      this._scheduleDataConnect(backoffMs(this.dataAttempt, DATA_BACKOFF_MAX_MS));
     };
-    ws.on('close', drop);
-    ws.on('error', drop);
-  }
-
-  _retryData(oldWs, attempt) {
-    if (this.stopped) return;
-    const delay = backoffMs(attempt, DATA_BACKOFF_MAX_MS);
-    const t = setTimeout(() => this._connectData(), delay);
-    t.unref?.();
+    ws.on('close', () => drop());
+    ws.on('error', () => drop());
   }
 
   /** 绑定帧到达：向本地代理发起 TCP 并开始搬运。 */

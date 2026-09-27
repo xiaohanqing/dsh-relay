@@ -94,6 +94,18 @@ export function apply(ctx, config = {}, internals = {}) {
     onRelayReady: () => {
       logger.info('dsh-relay: relay ready | NAS 中继已就绪');
     },
+    // dsh web 浏览器会话启动 token：新版 dsh 要求根路径带一次 ?token= 换会话 cookie。
+    // token 每次进程启动都变，必须实时从 connection 服务取（方法形式调用，勿丢 this）。
+    launchToken: internals.launchToken ?? (() => {
+      try {
+        const fn = ctx.connection?.authenticatedUrl;
+        if (typeof fn !== 'function') return '';
+        const url = new URL(fn.call(ctx.connection, `http://127.0.0.1:${dshPort}`));
+        return url.searchParams.get('token') ?? '';
+      } catch {
+        return '';
+      }
+    }),
     log: logger,
   });
 

@@ -67,6 +67,8 @@ export function createRelayService({
   isPinCustom = () => false,
   getRelayConfig = () => ({ url: '', token: '', enabled: false }),
   onRelayReady = () => {},
+  /** dsh web 浏览器会话启动 token（实时取，issue 平台契约：GET / 首次需 ?token= 换 cookie） */
+  launchToken = () => '',
   log = console,
 } = {}) {
   const logInfo = (...a) => (log.info ?? log.log).call(log, ...a);
@@ -135,6 +137,7 @@ export function createRelayService({
               isProtected: (kind) => (kind === 'public' ? true : getLanAuthEnabled()),
             },
             lanAccessEnabled: () => getLanEnabled(),
+            launchToken,
           });
           if (p !== port) logInfo(`dsh-relay: port ${port} busy, proxy on ${p} | 端口被占，改用 ${p}`);
           return proxy;
