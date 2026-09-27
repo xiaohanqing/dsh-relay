@@ -1,32 +1,40 @@
-# 验收清单（最终联调）
+# 部署验收清单
 
-插件重新启用 + NAS 部署完成后，逐项勾选。
+服务端 + 插件都部署完后，逐项勾选。
 
-## A. 插件启用复验（电脑侧）
+## A. 服务端
 
-- [ ] `cordis.patch.yml` 恢复 insert 行，重启 dsh-web
-- [ ] 启动后观察 ≥5 分钟：`journalctl -u dsh-web.service` 无 OOM/fatal；CPU 稳定（`top` 单进程 <10%）
+- [ ] `curl -k http://127.0.0.1:8443/__relay/status` → `{"ok":true,...}`（TLS 部署用 `curl -k https://...`）
+- [ ] `docker compose logs relay` 出现 `listening on ...`，无报错循环
+- [ ] 管理台 `http://<服务端>:8443/__relay/admin` 可登录（初始密码看 `docker compose logs relay | grep "admin password"`）
+- [ ] 已在管理台修改默认管理密码
+- [ ] TLS：`RELAY_TLS_CERT/RELAY_TLS_KEY` 已配置（或确认反代终止 TLS）
+
+## B. 插件（电脑侧）
+
 - [ ] 设置页出现「DSH Relay」，局域网二维码可见
-- [ ] 局域网手机扫码 → 登录页 → 输 PIN → 进入 DSH，与电脑实时同屏
-- [ ] **重启宿主再观察一轮**（自动恢复路径，上次事故的触发场景）
+- [ ] 一键接入提交申请后，管理台「待审批」出现该机器且身份档案（主机名/OS/MAC/IP）正确
+- [ ] 批准后插件状态自动变「已连接服务端」，无需手动填密钥串
+- [ ] 服务端 `docker compose logs relay` 出现 `plugin control connected (client=...)`
+- [ ] **重启 dsh web 再观察一轮**：中继自动恢复（不点任何按钮）
 
-## B. NAS 服务端
+## C. 手机访问
 
-- [ ] `curl -k https://127.0.0.1:8443/__relay/status` → `{"ok":true,...}`
-- [ ] 路由器转发 443→8443；外网手机流量验证：`curl -k https://<域名>/__relay/status` 通
-- [ ] 插件设置页填服务端地址 + Token → 开启 → 状态「已连接 NAS」
-- [ ] NAS 端 `docker compose logs relay` 出现 `plugin control connected`
+- [ ] 局域网：手机连同一 WiFi 扫局域网码 → 登录页 → 输访问密码 → 进入 DSH
+- [ ] 外网：手机关 WiFi 走蜂窝网络 → 打开公网地址 → 同样可用
+- [ ] DSH 界面内 WebSocket 实时功能正常（会话流式输出实时滚动）
+- [ ] 手机锁屏 10 分钟后重开页面仍可用（长连接保活生效）
+- [ ] 未登录状态下直接访问 DSH 接口返回 401（PIN 防线生效）
 
-## C. 外网端到端
+## D. 稳定性
 
-- [ ] 手机关 WiFi 走流量 → 打开 `https://<域名>` → 登录页 → PIN → DSH 正常使用
-- [ ] WebSocket 实时性：电脑发消息，手机会话实时刷新
-- [ ] 设置页显示「手机连接数 ≥1」（NAS 端 stats 回传）
-- [ ] 断线自愈：NAS `docker compose restart relay` → 插件状态「重连中」→ 数秒内自动恢复「已连接」→ 手机刷新可用
-- [ ] PIN 防线：未登录状态下直接访问 `/api` 返回 401
+- [ ] 服务端 `docker compose restart relay` → 插件 60 秒内自动重连，状态回「已连接」
+- [ ] 电脑重启 → dsh web 启动后中继自动恢复
+- [ ] 服务端长时间不可达时，插件重连有明显退避（日志无高频风暴）
 
-## D. 安全
+## E. 安全
 
-- [ ] `RELAY_TOKEN` 未出现在任何聊天/截图/仓库文件里
-- [ ] 路由器除 443（和签证书期的 80）外无其它公网端口映射
-- [ ] 二维码/密码未转发给无关人员
+- [ ] 服务端密钥串未出现在任何聊天记录/截屏/代码仓库里
+- [ ] 访问密码未分享给不需要的人（二维码 = 钥匙）
+- [ ] 管理台已限制内网访问（反代 deny 规则或防火墙）
+- [ ] 路由器只转发了必要端口（443 或反代端口），NAS 管理界面未暴露公网

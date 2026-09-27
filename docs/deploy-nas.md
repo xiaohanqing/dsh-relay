@@ -57,13 +57,45 @@ docker compose logs -f relay            # 看到 "listening on" 即成功
 | 443 | NAS:8443 (TCP) | 手机访问 + 插件隧道（同一端口，自动分流） |
 | 80 | NAS:80 (TCP) | 仅 certbot 签发/续期时需要（方式 A） |
 
+### 替代方案：已有 nginx 反向代理（无需在服务端上配证书）
+
+如果家里已有 OpenResty/1Panel 之类的反代（或者把服务端放在 VPS 上），可以直接用
+「公网域名(HTTPS) → 反代 → http://内网:8443」的方式，TLS 由反代终止：
+
+```nginx
+# 关键点：必须支持 WebSocket 升级（DSH 界面与插件隧道全是 WS）
+location / {
+    proxy_pass http://192.168.31.70:8443;
+    proxy_http_version 1.1;
+    proxy_set_header Upgrade $http_upgrade;
+    proxy_set_header Connection "upgrade";
+    proxy_set_header Host $host;
+    proxy_read_timeout 3600s;      # 长连接别被默认 60s 掐断
+    proxy_send_timeout 3600s;
+    client_max_body_size 16m;      # DSH 单请求上限 8MB，留余量
+    proxy_buffering off;           # 流式透传
+}
+
+# 建议把管理台限制在内网，不暴露公网
+location ^~ /__relay/admin {
+    allow 192.168.31.0/24;         # 改成你的实际网段
+    deny all;
+    proxy_pass http://192.168.31.70:8443;
+    proxy_set_header Host $host;
+}
+```
+
+注意：站点要**关掉 HTTP/2**（nginx 的 h2 不支持 WebSocket 升级）。此方式下插件填
+反代域名即可（如 `relay.example.com`，nginx 上的 https/wss 自动生效）。
+
 ## 4. 电脑端配置
 
 DSH 设置页 → DSH Relay：
 
-- 服务端地址：`dsh.example.com`（如果没做 443 转发而是直映射，写 `dsh.example.com:8443`）
-- Token：步骤 2 生成的值
-- 开启 → 状态显示「已连接 NAS」后扫码即可
+- **推荐「一键接入」**：填服务端地址 → 点「申请接入」→ 到管理台批准即可，
+  密钥串自动下发
+- 高级：手动填服务端地址 + 密钥串（管理台「添加客户端」生成）
+- 开启 → 状态显示「已连接服务端」后扫码即可
 
 ## 5. 多客户端（可选）：一个服务端带多台电脑
 

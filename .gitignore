@@ -5,3 +5,5 @@ certs/
 dist/
 client/client.js.bak
 .DS_Store
+*.tar.gz
+data/
