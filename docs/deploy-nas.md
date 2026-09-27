@@ -36,7 +36,7 @@ cp certs/live/dsh.example.com/privkey.pem certs/
 
 ### 方式 C：仅测试（不安全）
 
-compose 里去掉两个 TLS 环境变量并加 `RELAY_INSECURE=1`。**仅限本机调试，勿暴露公网。**
+compose 里删掉 `RELAY_TLS_CERT` / `RELAY_TLS_KEY` 两个环境变量即可——服务端检测不到证书会自动退化为无 TLS 模式（协议行为不变，仅少加密层）。**仅限本机调试，勿暴露公网。**
 
 ## 2. 配置与启动
 

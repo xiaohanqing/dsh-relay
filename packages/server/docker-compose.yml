@@ -3,7 +3,8 @@
 # 1. 准备 TLS 证书（三选一，见 docs/deploy-nas.md）：
 #    a) 已有证书：放到 ./certs/fullchain.pem 与 ./certs/privkey.pem
 #    b) 用 certbot（本 compose 文件带了一个可选服务，走 80 端口 HTTP-01）
-#    c) 测试体验：RELAY_INSECURE=1（不安全，勿长期使用）
+#    c) 测试体验（不安全，勿长期使用）：删掉下面 RELAY_TLS_CERT/RELAY_TLS_KEY
+#       两个环境变量，服务端自动退化为无 TLS 模式（协议行为不变，仅少了加密层）
 # 2. 生成 token：openssl rand -hex 24，写进 .env（RELAY_TOKEN=...）
 # 3. 路由器转发：外部 443 → NAS 8443；首次签证书还需 外部 80 → NAS 80
 # 4. docker compose up -d
