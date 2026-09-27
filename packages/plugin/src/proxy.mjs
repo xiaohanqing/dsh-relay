@@ -273,8 +273,14 @@ export function createRelayProxy({
   const limiter = auth ? createRateLimiter() : null;
   const handshake = createHandshakeTracker();
 
-  /** 该请求归属哪种 PIN（'public'|'lan'|null=免密）。 */
-  function pinKindFor(req) {
+  /**
+   * 该请求归属哪种 PIN（'public'|'lan'|null=免密）。
+   * @param forcePublic 隧道入口（inlet）上恒为 true：经 NAS 隧道注入的流量源地址必为
+   *   127.0.0.1，若按 Host 判定，攻击者持有 relay token 后伪造 `Host: 127.0.0.1`
+   *   即可冒充本机访问、绕过 PIN。所以入口上一律按公网强制密码，不信任任何 Host 声明。
+   */
+  function pinKindFor(req, forcePublic = false) {
+    if (forcePublic) return 'public';
     const host = policyHost(req, String(req.headers.host ?? ''));
     const cls = hostClass(host);
     if (cls === 'public') return 'public';
@@ -307,7 +313,7 @@ export function createRelayProxy({
     };
   }
 
-  const server = createServer((req, res) => {
+  function handleRequest(req, res, forcePublic = false) {
     const host = policyHost(req, String(req.headers.host ?? ''));
     const cls = hostClass(host);
 
@@ -325,7 +331,7 @@ export function createRelayProxy({
 
     // 访问密码
     if (auth) {
-      const kind = pinKindFor(req);
+      const kind = pinKindFor(req, forcePublic);
       const protectedKind = kind === 'public' ? true : (kind === 'lan' ? auth.isProtected('lan') : false);
       if (protectedKind) {
         const pin = auth.getPin(kind);
@@ -438,10 +444,10 @@ export function createRelayProxy({
       res.end(`dsh-relay: 无法连接上游 dsh web（${upstream.host}:${upstream.port}）——先启动 dsh web | upstream unreachable: ${err.message}`);
     });
     req.pipe(proxyReq);
-  });
+  }
 
   // WebSocket upgrade 原样透传（含 Host/Origin 改写与 PIN 校验）
-  server.on('upgrade', (req, socket, head) => {
+  function handleUpgrade(req, socket, head, forcePublic = false) {
     const host = policyHost(req, String(req.headers.host ?? ''));
     const cls = hostClass(host);
     if (cls === 'lan' && !lanAccessEnabled()) {
@@ -450,7 +456,7 @@ export function createRelayProxy({
       return;
     }
     if (auth) {
-      const kind = pinKindFor(req);
+      const kind = pinKindFor(req, forcePublic);
       const protectedKind = kind === 'public' ? true : (kind === 'lan' ? auth.isProtected('lan') : false);
       if (protectedKind) {
         const pin = auth.getPin(kind);
@@ -510,26 +516,43 @@ export function createRelayProxy({
     if (head?.length) proxyReq.write(head);
     proxyReq.end();
     socket.on('error', () => socket.destroy());
-  });
+  }
 
   // 连接跟踪：close() 时全量销毁（含 upgrade 后的裸 socket）
   const sockets = new Set();
-  server.on('connection', (sock) => {
+  const track = (server) => server.on('connection', (sock) => {
     sockets.add(sock);
     sock.on('close', () => sockets.delete(sock));
     sock.on('error', () => {});
   });
 
+  const server = createServer((req, res) => handleRequest(req, res, false));
+  server.on('upgrade', (req, socket, head) => handleUpgrade(req, socket, head, false));
+  track(server);
+
+  // 隧道专用入口：仅监听回环，relay 客户端从这里注入；其上流量一律按公网强制 PIN
+  const inlet = createServer((req, res) => handleRequest(req, res, true));
+  inlet.on('upgrade', (req, socket, head) => handleUpgrade(req, socket, head, true));
+  track(inlet);
+
   return new Promise((resolve, reject) => {
     server.once('error', reject);
+    inlet.once('error', reject);
     server.listen(port, host, () => {
-      resolve({
-        server,
-        port: server.address().port,
-        close: () => new Promise((r) => {
-          for (const s of sockets) { try { s.destroy(); } catch { /* 忽略 */ } }
-          server.close(() => r());
-        }),
+      inlet.listen(0, '127.0.0.1', () => {
+        resolve({
+          server,
+          inlet,
+          port: server.address().port,
+          inletPort: inlet.address().port,
+          close: () => new Promise((r) => {
+            for (const s of sockets) { try { s.destroy(); } catch { /* 忽略 */ } }
+            let n = 2;
+            const done = () => { if (--n === 0) r(); };
+            server.close(done);
+            inlet.close(done);
+          }),
+        });
       });
     });
   });

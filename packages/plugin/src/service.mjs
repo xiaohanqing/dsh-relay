@@ -160,7 +160,7 @@ export function createRelayService({
       client = new RelayClientCls({
         serverUrl: cfg.url,
         token: cfg.token,
-        proxyPort: p.port,
+        proxyPort: p.inletPort ?? p.port,
         log: logInfo,
         onChange: (snap) => {
           relayState = snap;

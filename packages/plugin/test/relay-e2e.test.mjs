@@ -21,6 +21,7 @@ const HOST = 'dsh.example.test';
 let stub;      // 假装 DSH web
 let stubPort = 0;
 let proxy;     // 本地代理
+let proxyInlet = 0; // 隧道专用入口（强制 public PIN）
 let relay;     // relay server
 let client;    // RelayClient
 
@@ -59,10 +60,11 @@ before(async () => {
   relay = createRelayServer({ port: PORT_RELAY, host: '127.0.0.1', token: TOKEN });
   await relay.listen();
 
+  proxyInlet = proxy.inletPort;
   client = new RelayClient({
     serverUrl: `ws://127.0.0.1:${PORT_RELAY}`,
     token: TOKEN,
-    proxyPort: PORT_PROXY,
+    proxyPort: proxyInlet, // 产品语义：隧道注入一律走 inlet（强制公网 PIN）
     log: () => {},
   });
   client.start();
@@ -92,7 +94,7 @@ async function waitFor(fn, timeoutMs, step = 50) {
 }
 
 /** 模拟手机：经 relay 服务器建立一条完整 HTTP 会话（多请求复用 keep-alive 连接）。 */
-function phoneAgent() {
+function phoneAgent(hostOverride) {
   const socket = net.connect(PORT_RELAY, '127.0.0.1');
   socket.setNoDelay(true);
   let buf = Buffer.alloc(0);
@@ -133,7 +135,7 @@ function phoneAgent() {
   });
   const request = (method, path, extraHeaders = '') => new Promise((resolve, reject) => {
     pending.push(resolve);
-    socket.write(`${method} ${path} HTTP/1.1\r\nHost: ${HOST}\r\nConnection: keep-alive\r\n${extraHeaders}\r\n`);
+    socket.write(`${method} ${path} HTTP/1.1\r\nHost: ${hostOverride ?? HOST}\r\nConnection: keep-alive\r\n${extraHeaders}\r\n`);
   });
   const close = () => socket.destroy();
   socket.on('error', () => {});
@@ -229,6 +231,14 @@ describe('dsh-relay 端到端', () => {
     const phone = phoneAgent();
     const res = await phone.request('GET', `/api/json?token=${PIN}`);
     assert.equal(res.status, 200);
+    phone.close();
+  });
+
+  test('隧道注入流量伪造 Host: 127.0.0.1 → 仍强制 PIN（防 relay token 泄露提权）', async () => {
+    // 手机侧经隧道伪造 loopback Host：inlet 入口必须无视 Host 声明、强制公网密码
+    const phone = phoneAgent('127.0.0.1');
+    const res = await phone.request('GET', '/api/json');
+    assert.equal(res.status, 401, '伪造 loopback Host 必须仍要求 PIN');
     phone.close();
   });
 
