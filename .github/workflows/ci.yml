@@ -28,3 +28,5 @@ jobs:
         run: npm test --prefix packages/server
       - name: Test plugin
         run: npm test --prefix packages/plugin
+      - name: Worst-case startup path (reconnect storm guard)
+        run: npm run test:worst --prefix packages/plugin

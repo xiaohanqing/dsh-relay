@@ -121,8 +121,11 @@ export function createRelayServer(overrides = {}) {
       for (const ws2 of [...state.idleData]) { try { ws2.close(1001, 'plugin offline'); } catch { /* 忽略 */ } }
       state.idleData.clear();
     };
-    ws.on('close', drop);
-    ws.on('error', drop);
+    // once 守卫：close/error 对同一连接各触发一次，drop 只能执行一次
+    let ctlDropped = false;
+    const dropOnce = () => { if (ctlDropped) return; ctlDropped = true; drop(); };
+    ws.on('close', dropOnce);
+    ws.on('error', dropOnce);
   }
 
   function onDataSocket(ws) {

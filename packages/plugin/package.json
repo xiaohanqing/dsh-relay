@@ -17,7 +17,8 @@
   ],
   "scripts": {
     "build:client": "node client/build.mjs",
-    "test": "node --test --test-timeout=60000 \"test/*.test.mjs\""
+    "test": "node --test --test-timeout=60000 \"test/*.test.mjs\"",
+    "test:worst": "node test-local/worst-case.mjs"
   },
   "dependencies": {
     "qrcode": "^1.5.4",
