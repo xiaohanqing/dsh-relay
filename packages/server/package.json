@@ -34,5 +34,5 @@
     "url": "git+https://github.com/xiaohanqing/dsh-relay.git",
     "directory": "packages/server"
   },
-  "version": "0.3.0"
+  "version": "0.4.0"
 }
