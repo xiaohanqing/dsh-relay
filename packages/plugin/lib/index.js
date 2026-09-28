@@ -9747,6 +9747,7 @@ function createTunnelManager({ home, localPort, onChange = () => {
     emit({
       phase: "running",
       pid: p.pid,
+      publicUrl: adapter.derivePublicUrl?.(cfg.config) || snap.publicUrl || "",
       detail: adapter.derivePublicUrl?.(cfg.config) ? `\u5DF2\u542F\u52A8 ${cfg.tool}` : "\u5DF2\u542F\u52A8\uFF0C\u7B49\u5F85\u516C\u7F51\u5730\u5740\u2026 | started, waiting for public url\u2026",
       binPath: bin
     });

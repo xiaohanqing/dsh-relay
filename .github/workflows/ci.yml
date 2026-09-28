@@ -35,3 +35,13 @@ jobs:
 
       - name: Worst-case startup path (reconnect storm guard)
         run: pnpm test:worst
+
+      - name: Download frp binaries for live e2e
+        run: |
+          curl -fsSL -o /tmp/frp.tar.gz https://github.com/fatedier/frp/releases/download/v0.71.0/frp_0.71.0_linux_amd64.tar.gz
+          mkdir -p /tmp/frp-live && tar xzf /tmp/frp.tar.gz -C /tmp/frp-live --strip-components=1
+
+      - name: frp live e2e (real frps + frpc)
+        run: pnpm --filter dsh-relay run test:frp
+        env:
+          FRP_BIN: /tmp/frp-live

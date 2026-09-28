@@ -21,6 +21,7 @@
     "build:host": "node build-host.mjs",
     "build:client": "node client/build.mjs",
     "test": "node --test --test-timeout=60000 --test-force-exit \"test/*.test.mjs\"",
+    "test:frp": "node --test --test-timeout=60000 --test-force-exit test/frp-live.e2e.test.mjs",
     "test:worst": "node test-local/worst-case.mjs",
     "test:worst:tunnel": "node test-local/worst-case-tunnel.mjs"
   },
