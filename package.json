@@ -1,0 +1,23 @@
+{
+  "name": "dsh-relay-monorepo",
+  "private": true,
+  "version": "0.4.0",
+  "packageManager": "pnpm@12.5.1",
+  "description": "Phone access to your own DeepSeek Harness through a relay you control — or any tunnel you already have (frp, cloudflared, natapp, …).",
+  "scripts": {
+    "check": "node scripts/check.mjs",
+    "build": "node scripts/build.mjs",
+    "test": "pnpm -r --workspace-concurrency=1 test",
+    "test:worst": "pnpm --filter dsh-relay run test:worst",
+    "test:worst:tunnel": "pnpm --filter dsh-relay run test:worst:tunnel",
+    "release": "node scripts/release.mjs"
+  },
+  "engines": {
+    "node": ">=22"
+  },
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/xiaohanqing/dsh-relay.git"
+  }
+}

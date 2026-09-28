@@ -10,23 +10,28 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+
+      - uses: pnpm/action-setup@v4
+
       - uses: actions/setup-node@v4
         with:
           node-version: 22
+          cache: pnpm
+
       - name: Install deps
-        run: |
-          npm install --prefix packages/plugin
-          npm install --prefix packages/server
+        run: pnpm install --frozen-lockfile
+
       - name: Syntax check all sources
-        run: |
-          for f in $(find packages -name "*.mjs" -o -name "*.js" | grep -v node_modules | grep -v "client/client.js"); do
-            node --check "$f"
-          done
-      - name: Build client bundle
-        run: npm run build:client --prefix packages/plugin
+        run: pnpm check
+
+      - name: Build artifacts (host bundle + client bundle) and verify freshness
+        run: pnpm build
+
       - name: Test server
-        run: npm test --prefix packages/server
+        run: pnpm --filter dsh-relay-server test
+
       - name: Test plugin
-        run: npm test --prefix packages/plugin
+        run: pnpm --filter dsh-relay test
+
       - name: Worst-case startup path (reconnect storm guard)
-        run: npm run test:worst --prefix packages/plugin
+        run: pnpm test:worst

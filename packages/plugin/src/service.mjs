@@ -1,17 +1,16 @@
 // dsh-relay 服务编排：本地代理 + relay 隧道客户端 + 状态聚合
+//
+// 依赖以静态 import 声明（构建时由 esbuild 打进 lib/index.js，插件包零运行时依赖）。
 
 import { networkInterfaces, hostname as osHostname, platform as osPlatform, arch as osArch } from 'node:os';
-import { createRequire } from 'node:module';
 import { readFileSync, rmSync, mkdirSync, writeFileSync } from 'node:fs';
 import { join, dirname } from 'node:path';
 import { homedir } from 'node:os';
+import QRCode from 'qrcode';
 import { createRelayProxy } from './proxy.mjs';
 import { RelayClient, publicUrlFromServer, httpBaseFromServer } from './relay.mjs';
 
-const require = createRequire(import.meta.url);
-
 export function qrDataUrl(text, { width = 220, margin = 1 } = {}) {
-  const QRCode = require('qrcode');
   return QRCode.toDataURL(text, { errorCorrectionLevel: 'M', margin, width, type: 'image/png' });
 }
 

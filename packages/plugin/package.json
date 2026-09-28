@@ -1,31 +1,33 @@
 {
   "name": "dsh-relay",
-  "description": "手机随时访问你自己的 DSH：流量走你自己的 NAS 中继（自托管），不依赖任何第三方云。局域网扫码 + 外网隧道，断线自动重连。",
+  "description": "手机随时访问你自己的 DSH：流量走你自己的 NAS 中继（自托管），或复用你已有的 frp 等隧道，不依赖任何第三方云。局域网扫码 + 外网隧道，断线自动重连。",
   "type": "module",
-  "main": "src/index.js",
+  "main": "lib/index.js",
   "exports": {
-    ".": "./src/index.js",
+    ".": "./lib/index.js",
     "./client": "./client/client.js",
     "./package.json": "./package.json"
   },
   "files": [
     "src",
+    "lib",
     "client/client.js",
     "cordis.patch.yml",
     "README.md",
     "LICENSE"
   ],
   "scripts": {
+    "build": "node build-host.mjs && node client/build.mjs",
+    "build:host": "node build-host.mjs",
     "build:client": "node client/build.mjs",
     "test": "node --test --test-timeout=60000 --test-force-exit \"test/*.test.mjs\"",
-    "test:worst": "node test-local/worst-case.mjs"
-  },
-  "dependencies": {
-    "qrcode": "^1.5.4",
-    "ws": "^8.18.0"
+    "test:worst": "node test-local/worst-case.mjs",
+    "test:worst:tunnel": "node test-local/worst-case-tunnel.mjs"
   },
   "devDependencies": {
-    "esbuild": "^0.25.9"
+    "esbuild": "^0.25.9",
+    "qrcode": "^1.5.4",
+    "ws": "^8.18.0"
   },
   "peerDependencies": {
     "@deepseek-ai/cordis": "^4.0.1"
@@ -40,12 +42,15 @@
     "mobile",
     "remote-access",
     "relay",
+    "tunnel",
+    "frp",
     "self-hosted",
     "nas"
   ],
   "repository": {
     "type": "git",
-    "url": "git+https://github.com/xiaohanqing/dsh-relay.git"
+    "url": "git+https://github.com/xiaohanqing/dsh-relay.git",
+    "directory": "packages/plugin"
   },
   "bugs": {
     "url": "https://github.com/xiaohanqing/dsh-relay/issues"
