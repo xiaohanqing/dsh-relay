@@ -2,6 +2,9 @@
 
 目标：在一台有公网 IPv4 的 NAS / Linux 机器上，把 `dsh-relay-server` 跑起来。
 
+> 不想自建服务端？外接隧道模式复用已有的 frp 等内网穿透工具，零部署——
+> 见 [tunnel.md](tunnel.md)。本指南只面向「要一台自己掌控的多客户端中继」的场景。
+
 ## 0. 前提检查
 
 - NAS 能跑 Docker（群晖 Container Manager / 威联通 Container Station / 任意 Linux + docker compose）
