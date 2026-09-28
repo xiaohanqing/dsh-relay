@@ -26,22 +26,40 @@ writeFileSync(`${HOME}/dsh-relay/relay-auto.json`, JSON.stringify({ at: Date.now
 process.env.DSH_HOME = HOME;
 
 // 2. 计数 WebSocket：统计连接尝试速率
+// 指标用 3 秒滑动窗口平均而不是单秒峰值：退避封顶后 8 条池连接按 +0/0.7/1.4/2.1/2.8s
+// 轮转散布，单秒桶天然在 3~4 之间抖动（桶边界毛刺）；持续风暴（无退避全速重连）则
+// 任何窗口都会远超阈值。窗口平均既容忍毛刺，又照样抓住风暴。
 let attempts = 0;
-let attemptsThisSecond = 0;
-let maxAttemptsPerSecondDown = 0; // 目标不可达期间的峰值速率（这才是风暴指标）
+const attemptTimes = []; // 目标不可达期间的尝试时间戳（滑动窗口原料）
+const RATE_WINDOW_MS = 3000;
+const RATE_LIMIT_PER_SEC = 3;
+let maxAttemptsPerSecondDown = 0; // 窗口平均的峰值（展示用）
 let targetUp = false;
 const t0 = Date.now();
+function peakWindowRate() {
+  let peak = 0;
+  for (let i = 0; i < attemptTimes.length; i++) {
+    // 以第 i 条尝试为窗口起点，统计 3s 窗口内的条数
+    let n = 0;
+    for (let j = i; j < attemptTimes.length && attemptTimes[j] - attemptTimes[i] < RATE_WINDOW_MS; j++) n++;
+    peak = Math.max(peak, n);
+  }
+  return peak;
+}
 setInterval(() => {
   // 排除启动后前 2 秒：start() 的初始池建立（ctl+8 条）是预期的一次性 burst
   if (!targetUp && Date.now() - t0 > 2000) {
-    maxAttemptsPerSecondDown = Math.max(maxAttemptsPerSecondDown, attemptsThisSecond);
+    const peak = peakWindowRate();
+    maxAttemptsPerSecondDown = Math.max(maxAttemptsPerSecondDown, Math.ceil(peak / (RATE_WINDOW_MS / 1000)));
+  } else if (targetUp) {
+    attemptTimes.length = 0;
   }
-  attemptsThisSecond = 0;
-}, 1000).unref();
+}, 500).unref();
 
 class CountingWS {
   constructor(url, opts) {
-    attempts++; attemptsThisSecond++;
+    attempts++;
+    if (!targetUp && Date.now() - t0 > 2000) attemptTimes.push(Date.now());
     return new (globalThis.__RealWS)(url, opts);
   }
   static get OPEN() { return globalThis.__RealWS.OPEN; }
@@ -95,9 +113,9 @@ const downTimer = setTimeout(() => {
 // 6. t=45s：出结果
 setTimeout(async () => {
   const rssGrowMB = (maxRss - rss0) / 1024 / 1024;
-  console.log(`attempts total = ${attempts}, max/sec while target down = ${maxAttemptsPerSecondDown}`);
+  console.log(`attempts total = ${attempts}, peak window avg (${RATE_WINDOW_MS / 1000}s) while target down = ${maxAttemptsPerSecondDown}/sec`);
   console.log(`RSS growth = ${rssGrowMB.toFixed(1)} MB (max ${(maxRss / 1024 / 1024).toFixed(0)} MB)`);
-  const pass = rssGrowMB < 30 && maxAttemptsPerSecondDown <= 3;
+  const pass = rssGrowMB < 30 && maxAttemptsPerSecondDown <= RATE_LIMIT_PER_SEC;
   console.log(pass ? 'PASS ✓' : 'FAIL ✗');
   if (relay) await relay.close();
   rmSync(HOME, { recursive: true, force: true });

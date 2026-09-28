@@ -2,6 +2,47 @@
 
 本项目的可读变更记录（语义化版本）。
 
+## [0.4.0] - 2026-09-28
+
+### 新增
+- **外接隧道模式**：免自建服务端，复用已有的 frp 等内网穿透工具
+  - 稳定回环注入口（默认 `127.0.0.1:3083`，仅回环监听、被占自动 +1 且实际端口
+    持久化；其上流量与 relay 隧道入口同语义——一律按公网强制访问密码 + 限速，
+    不信任 Host 头声明）
+  - 深度适配 **frp**：表单生成 `frpc.toml`（tcp 端口映射 / http / https 域名复用，
+    `transport.tls.enable` 默认开，`loginFailExit = false`），`frpc verify` 启动
+    预检（旧版无此子命令时跳过并提示），自动注入回环 admin 端口便于排障；支持
+    直接粘贴完整 frpc.toml 的高级模式
+  - 深度适配 **cloudflared**：快速隧道免账号拿临时 HTTPS 域名；named tunnel 支持
+    填 token 固定域名
+  - 深度适配 **natapp**：粘贴 authtoken 即用（国内节点，免费隧道 1Mbps/随机域名）
+  - **自定义模板**（万能兜底）：任意工具的启动命令 + 可选配置文件模板，
+    支持 `{{port}}` / `{{configFile}}` 占位符，命令按 shell 词法切分防注入——
+    bore、rathole、nps 等均可接入
+  - **TunnelManager 进程守护**（对齐重连红线）：exit/error once 守卫、manager 级
+    退避（60s 硬封顶、稳定运行 60s 才复位）、单进程 spawn 状态机、
+    SIGTERM→SIGKILL 进程组收割、日志环形缓冲 50 行；配置类错误不自动重试
+- **接入方式三态**：`mode = relay | tunnel | lan`（自建服务端 / 外接隧道 / 仅局域网），
+  设置页重构为三选一；0.3.x 配置无 `mode` 字段时按 `relayEnabled` 推导，升级行为
+  完全不变
+- **pnpm monorepo 重组**：根 `package.json` + `pnpm-workspace.yaml` + `scripts/`
+  （check / build / release），CI 全面切换 pnpm；插件包改为**自包含构建**——
+  `src/index.js` 经 `build-host.mjs` 打包为 `lib/index.js`（运行时依赖一并内联），
+  产物随仓库提交，`dsh plugin add` 本地安装不再依赖包目录内的 node_modules，
+  构建脚本对产物与源码不同步直接失败
+
+### 测试
+- **worst-case 隧道红线回归**（`test:worst:tunnel`）：隧道目标"起不来→恢复→再亡"
+  全程监控 RSS 与 spawn 速率（≤1 次/秒）
+- 适配器单测 20+（配置生成 / URL 推导 / 命令切分 / URL 提取 / 二进制定位）、
+  TunnelManager 生命周期 10 例、注入口安全契约 e2e（伪造 loopback Host 不免密、
+  密码通过后种 cookie、限速锁定）
+
+### 修复
+- `logWarn` 双打：`log.warn` 返回 undefined 时误触 console 兜底，同一告警打两遍
+- worst-case 速率指标窗口化：排除启动初期连接池建立的预期 burst，指标只度量
+  真正的风暴区间
+
 ## [0.1.0] - 2026-09-27
 
 首个公开版本。

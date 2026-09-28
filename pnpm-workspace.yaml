@@ -1,0 +1,12 @@
+packages:
+  - packages/*
+
+# Real-file node_modules (npm shape), NOT symlinked into the pnpm store:
+# the plugin package is consumed by `dsh plugin add` as a physical directory,
+# and qrcode is resolved via createRequire — both break with the default
+# symlink layout. Must stay hoisted. (pnpm 12 reads this only from this file,
+# not from .npmrc — kept in sync with the web profile's own setting.)
+nodeLinker: hoisted
+
+allowBuilds:
+  esbuild: true
