@@ -56,12 +56,14 @@ desktop, in real time.
 
 Requirements: a running DSH web instance, and Node.js ≥ 22 with pnpm for development.
 
-**1. Install the plugin** (on the computer running DSH):
+**1. Install the plugin** (on the computer running DSH) — one command, straight from GitHub:
 
 ```bash
-dsh plugin --profile web add /path/to/dsh-relay/packages/plugin
+dsh plugin --profile web add 'github:xiaohanqing/dsh-relay#path:packages/plugin'
 # restart dsh web, then open Settings → DSH Relay
 ```
+
+To upgrade later, run the same command again (or `dsh plugin --profile web update dsh-relay`).
 
 **2a. Connect through a tunnel you already have** (most common path):
 

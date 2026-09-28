@@ -50,12 +50,14 @@
 
 前提：一台跑着 DSH web 的电脑；开发参与需要 Node.js ≥ 22 与 pnpm。
 
-**1. 安装插件**（在跑 DSH 的电脑上）：
+**1. 安装插件**（在跑 DSH 的电脑上）——一条命令，直接从 GitHub 装：
 
 ```bash
-dsh plugin --profile web add /path/to/dsh-relay/packages/plugin
+dsh plugin --profile web add 'github:xiaohanqing/dsh-relay#path:packages/plugin'
 # 重启 dsh web，设置页出现「DSH Relay」
 ```
+
+以后升级：重跑同一条命令（或 `dsh plugin --profile web update dsh-relay`）。
 
 **2a. 复用已有的隧道**（大多数人的路径）：
 

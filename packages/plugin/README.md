@@ -5,7 +5,7 @@
 功能总览与快速上手见[主 README](../../README.md)。
 
 ```bash
-dsh plugin --profile web add /path/to/dsh-relay/packages/plugin
+dsh plugin --profile web add 'github:xiaohanqing/dsh-relay#path:packages/plugin'
 # 重启 dsh web，设置页出现「DSH Relay」
 ```
 
