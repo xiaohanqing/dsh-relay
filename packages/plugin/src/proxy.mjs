@@ -259,6 +259,10 @@ export function withLaunchToken(reqUrl, req, launchToken, tracker) {
  * @param {() => boolean} [opts.lanAccessEnabled]  局域网访问开关（默认开）
  * @param {() => string} [opts.launchToken] dsh web 启动 token（实时取）
  * @param {boolean} [opts.injectPolyfills] 是否注入 polyfill（默认 true）
+ * @param {number} [opts.tunnelPort]     >=0 时额外监听 127.0.0.1:tunnelPort —— 稳定回环
+ *                                       隧道注入口，供外接隧道（frp/cloudflared/任意 TCP
+ *                                       转发）把公网流量注入本机；端口被占自动 +1。
+ *                                       0 = 随机端口；null/缺省 = 不创建（老测试路径零行为变化）。
  */
 export function createRelayProxy({
   port = 3082,
@@ -268,6 +272,7 @@ export function createRelayProxy({
   lanAccessEnabled = () => true,
   launchToken = () => '',
   injectPolyfills = true,
+  tunnelPort = null,
   log = () => {},
 } = {}) {
   const limiter = auth ? createRateLimiter() : null;
@@ -535,24 +540,66 @@ export function createRelayProxy({
   inlet.on('upgrade', (req, socket, head) => handleUpgrade(req, socket, head, true));
   track(inlet);
 
+  // 外接隧道注入口（可选）：固定回环端口，frp/cloudflared/任意 TCP 转发的转发目标。
+  // 与 relay inlet 同语义：流量一律按公网强制 PIN，不受 LAN 开关影响。
+  // 与随机 inlet 的区别：端口稳定且持久化（跨重启不变），跨进程的隧道客户端才能写死目标。
+  const tunnelInlet = typeof tunnelPort === 'number' && tunnelPort >= 0
+    ? createServer((req, res) => handleRequest(req, res, true))
+    : null;
+  if (tunnelInlet) {
+    tunnelInlet.on('upgrade', (req, socket, head) => handleUpgrade(req, socket, head, true));
+    track(tunnelInlet);
+  }
+
+  /** 监听，端口被占自动 +1 重试（最多 10 次），返回实际端口。 */
+  function listenWithFallback(srv, want, bindHost) {
+    return new Promise((resolvePort, rejectPort) => {
+      let retries = 10;
+      let current = want;
+      const onError = (err) => {
+        if (err?.code === 'EADDRINUSE' && retries > 0) { retries -= 1; current += 1; srv.listen(current, bindHost, onListening); return; }
+        srv.removeListener('error', onError);
+        rejectPort(err);
+      };
+      const onListening = () => {
+        srv.removeListener('error', onError);
+        resolvePort(srv.address()?.port ?? current);
+      };
+      srv.on('error', onError);
+      srv.listen(current, bindHost, onListening);
+    });
+  }
+
+  const listeners = [server, inlet];
   return new Promise((resolve, reject) => {
     server.once('error', reject);
     inlet.once('error', reject);
     server.listen(port, host, () => {
       inlet.listen(0, '127.0.0.1', () => {
-        resolve({
-          server,
-          inlet,
-          port: server.address().port,
-          inletPort: inlet.address().port,
-          close: () => new Promise((r) => {
-            for (const s of sockets) { try { s.destroy(); } catch { /* 忽略 */ } }
-            let n = 2;
-            const done = () => { if (--n === 0) r(); };
-            server.close(done);
-            inlet.close(done);
-          }),
-        });
+        const finish = (resolvedTunnelPort) => {
+          resolve({
+            server,
+            inlet,
+            tunnelInlet,
+            port: server.address().port,
+            inletPort: inlet.address().port,
+            tunnelPort: resolvedTunnelPort, // 未启用时为 null
+            close: () => new Promise((r) => {
+              for (const s of sockets) { try { s.destroy(); } catch { /* 忽略 */ } }
+              let n = listeners.length;
+              const done = () => { if (--n === 0) r(); };
+              for (const l of listeners) l.close(done);
+            }),
+          });
+        };
+        if (!tunnelInlet) return finish(null);
+        listenWithFallback(tunnelInlet, tunnelPort, '127.0.0.1')
+          .then((resolved) => {
+            tunnelInlet.on('error', (err) => log(`dsh-relay: tunnel inlet error: ${err?.message ?? err}`));
+            listeners.push(tunnelInlet);
+            finish(resolved);
+          })
+          .catch(reject);
       });
     });
   });

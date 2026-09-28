@@ -17,6 +17,8 @@ import {
   lanEnabled, setLanEnabled, lanAuthEnabled, setLanAuthEnabled,
   lanIpOverride, setLanIpOverride, pinCustom, setPinCustom,
   relayEnabled, setRelayEnabled, relayUrl, setRelayUrl, relayToken, setRelayToken,
+  accessMode, setAccessMode, tunnelConfig, setTunnelConfig,
+  tunnelInletPort, setTunnelInletPort,
   resetSettings, proxyPort,
 } from './settings.mjs';
 
@@ -96,6 +98,12 @@ export function apply(ctx, config = {}, internals = {}) {
       if (token !== undefined && token !== '') setRelayToken(token);
       setRelayEnabled(true);
     },
+    // ---- 外接隧道 ----
+    getTunnelConfig: () => tunnelConfig(),
+    getTunnelInletPort: () => tunnelInletPort(),
+    saveTunnelInletPort: (p) => { setTunnelInletPort(p); },
+    getAccessMode: () => accessMode(),
+    setAccessMode: (mode) => { setAccessMode(mode); },
     pluginVersion: (() => {
       try { return JSON.parse(readFileSync(new URL('../package.json', import.meta.url), 'utf8')).version; } catch { return ''; }
     })(),
@@ -173,6 +181,42 @@ export function apply(ctx, config = {}, internals = {}) {
         service.enrollCancel();
         return await statusPayload();
 
+      // ---- 外接隧道 ----
+      case 'tunnel.status':
+        return await statusPayload();
+
+      case 'tunnel.detect':
+        return ok({ tools: service.tunnelDetect() });
+
+      case 'tunnel.setConfig': {
+        try {
+          setTunnelConfig({
+            ...(payload?.tool !== undefined ? { tool: payload.tool } : {}),
+            ...(payload?.binPath !== undefined ? { binPath: payload.binPath } : {}),
+            ...(payload?.config !== undefined ? { config: payload.config } : {}),
+          });
+        } catch (err) {
+          return fail(err?.message ?? String(err));
+        }
+        return await statusPayload();
+      }
+
+      case 'tunnel.start': {
+        if (payload?.confirm !== true) {
+          return fail('开启前请确认安全提示 | please confirm the security notice first');
+        }
+        try {
+          await service.startTunnel();
+        } catch (err) {
+          return fail(err?.message ?? String(err));
+        }
+        return await statusPayload();
+      }
+
+      case 'tunnel.stop':
+        service.stopTunnel();
+        return await statusPayload();
+
       case 'lan.setEnabled':
         setLanEnabled(payload?.on === true);
         return await statusPayload();
@@ -195,6 +239,7 @@ export function apply(ctx, config = {}, internals = {}) {
       case 'relay.reset': {
         if (payload?.confirm !== true) return fail('恢复出厂需要确认 | reset requires confirmation');
         service.stopRelay();
+        service.stopTunnel();
         resetSettings();
         const pins = resetPins();
         return ok({ ...(await service.status()), accessToken: pins.public, lanToken: pins.lan });
@@ -212,11 +257,11 @@ export function apply(ctx, config = {}, internals = {}) {
 
   const disposeRpc = installRpc(ctx, { channel: '/dsh-relay', handler, log: logger });
 
-  // 代理随插件启动；上次开着中继则自动恢复
+  // 代理随插件启动；按持久化接入方式自动恢复（relay / tunnel / lan）
   void service.startProxy()
     .then((p) => {
-      logger.info('dsh-relay: proxy ready on :%d | 本地代理已就绪', p.port);
-      return service.restoreRelayIfNeeded();
+      logger.info('dsh-relay: proxy ready on :%d (tunnel inlet :%s) | 本地代理已就绪', p.port, p.tunnelPort ?? '-');
+      return service.restoreIfNeeded();
     })
     .catch((err) => {
       logger.error('dsh-relay: proxy start failed | 代理启动失败: %s', err?.message ?? err);

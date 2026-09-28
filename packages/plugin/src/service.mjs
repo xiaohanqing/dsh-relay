@@ -1,4 +1,4 @@
-// dsh-relay 服务编排：本地代理 + relay 隧道客户端 + 状态聚合
+// dsh-relay 服务编排：本地代理 + relay 隧道客户端 + 外接隧道守护 + 状态聚合
 //
 // 依赖以静态 import 声明（构建时由 esbuild 打进 lib/index.js，插件包零运行时依赖）。
 
@@ -9,6 +9,7 @@ import { homedir } from 'node:os';
 import QRCode from 'qrcode';
 import { createRelayProxy } from './proxy.mjs';
 import { RelayClient, publicUrlFromServer, httpBaseFromServer } from './relay.mjs';
+import { createTunnelManager } from './tunnel.mjs';
 
 export function qrDataUrl(text, { width = 220, margin = 1 } = {}) {
   return QRCode.toDataURL(text, { errorCorrectionLevel: 'M', margin, width, type: 'image/png' });
@@ -66,6 +67,12 @@ export function createRelayService({
   isPinCustom = () => false,
   getRelayConfig = () => ({ url: '', token: '', enabled: false }),
   saveRelayConfig = null, // async ({ url, token }) => void：准入批准/密钥轮换时持久化
+  // ---- 外接隧道模式 ----
+  getTunnelConfig = () => ({ tool: 'frp', binPath: '', config: {} }),
+  getTunnelInletPort = () => 0, // 0 = 用默认 3083
+  saveTunnelInletPort = null,   // (actualPort) => void：注入口被占漂移后持久化实际值
+  getAccessMode = () => 'relay', // 'relay' | 'tunnel' | 'lan'
+  setAccessMode = null,          // (mode) => void：启动/停止时同步持久化
   pluginVersion = '',
   onRelayReady = () => {},
   /** dsh web 浏览器会话启动 token（实时取，issue 平台契约：GET / 首次需 ?token= 换 cookie） */
@@ -73,7 +80,12 @@ export function createRelayService({
   log = console,
 } = {}) {
   const logInfo = (...a) => (log.info ?? log.log).call(log, ...a);
-  const logWarn = (...a) => log.warn?.(...a) ?? console.warn(...a);
+  const logWarn = (...a) => {
+    // 注意：不要写 `log.warn?.(...a) ?? console.warn(...a)` —— 标准 logger.warn 返回
+    // undefined，会导致每条警告双打（console 兜底再打一遍）。
+    if (typeof log.warn === 'function') log.warn(...a);
+    else console.warn(...a);
+  };
 
   const createProxyFn = hooks.createProxy ?? createRelayProxy;
   const RelayClientCls = hooks.RelayClient ?? RelayClient;
@@ -81,7 +93,9 @@ export function createRelayService({
 
   let proxy = null;
   let client = null;
+  let tunnel = null;
   let relayState = { phase: 'idle', detail: '', attempts: 0, nextRetryAt: null, server: null };
+  let tunnelState = { phase: 'idle', tool: '', detail: '', publicUrl: '', attempts: 0, nextRetryAt: null, pid: null, logs: [] };
   const qrCache = new Map();
   let lanCache = null;
   // 进程级会话密钥：PIN 的登录 cookie 绑定它，DSH 重启后手机需重新输一次密码
@@ -229,7 +243,7 @@ export function createRelayService({
   const api = {
     dshPort,
 
-    /** 启动本地代理（幂等）。端口被占自动 +1 重试。 */
+    /** 启动本地代理（幂等）。端口被占自动 +1 重试；同时拉起稳定隧道注入口。 */
     async startProxy() {
       if (proxy) return proxy;
       let lastErr = null;
@@ -246,8 +260,14 @@ export function createRelayService({
             },
             lanAccessEnabled: () => getLanEnabled(),
             launchToken,
+            tunnelPort: getTunnelInletPort() || 3083,
           });
           if (p !== port) logInfo(`dsh-relay: port ${port} busy, proxy on ${p} | 端口被占，改用 ${p}`);
+          // 注入口漂移持久化：外部的 frpc.toml 指向固定端口，漂移必须让用户无感
+          if (proxy.tunnelPort && proxy.tunnelPort !== (getTunnelInletPort() || 3083)) {
+            logInfo(`dsh-relay: tunnel inlet drifted to ${proxy.tunnelPort} | 隧道注入口被占，改用 ${proxy.tunnelPort}`);
+            try { saveTunnelInletPort?.(proxy.tunnelPort); } catch { /* 忽略 */ }
+          }
           return proxy;
         } catch (err) {
           if (err?.code !== 'EADDRINUSE') throw err;
@@ -257,14 +277,15 @@ export function createRelayService({
       throw lastErr ?? new Error('proxy start failed');
     },
 
-    /** 开启中继（幂等）。 */
+    /** 开启中继（幂等）。中继与外接隧道互斥：开中继先停隧道。 */
     async startRelay() {
       const cfg = getRelayConfig();
       if (!cfg.url || !cfg.token) {
         throw new Error('请先在设置里填写服务端地址和密钥串 | set the relay server address and secret first');
       }
       const p = await this.startProxy();
-      if (client?.running) return publicUrlFromServer(cfg.url);
+      if (client?.running) { this._markMode('relay'); return publicUrlFromServer(cfg.url); }
+      this.stopTunnel({ keepMarker: true });
       client = new RelayClientCls({
         serverUrl: cfg.url,
         token: cfg.token,
@@ -283,6 +304,7 @@ export function createRelayService({
       });
       client.start();
       persistAutoMarker();
+      this._markMode('relay');
       return publicUrlFromServer(cfg.url);
     },
 
@@ -290,7 +312,65 @@ export function createRelayService({
       client?.stop();
       client = null;
       relayState = { phase: 'idle', detail: '', attempts: 0, nextRetryAt: null, server: null };
-      if (!keepMarker) clearAutoMarker();
+      // 模式降级与标记清理只发生在「用户显式停止当前活跃通道」时；
+      // dispose/模式切换（keepMarker=true）绝不动持久化状态，否则重启后无法自动恢复。
+      const wasActiveMode = getAccessMode() === 'relay';
+      if (!keepMarker) {
+        if (wasActiveMode) { clearAutoMarker(); this._markMode('lan'); }
+        else if (!tunnel?.running) clearAutoMarker();
+      }
+    },
+
+    // ---------- 外接隧道（frp / cloudflared / natapp / 自定义） ----------
+
+    _markMode(mode) {
+      try { setAccessMode?.(mode); } catch (err) { logWarn(`dsh-relay: persist access mode failed: ${err?.message ?? err}`); }
+    },
+
+    /** 开启外接隧道（幂等）。与中继互斥：开隧道先停中继。 */
+    async startTunnel() {
+      const p = await this.startProxy();
+      if (!p.tunnelPort) throw new Error('隧道注入口未启动 | tunnel inlet not available');
+      const cfg = getTunnelConfig();
+      this.stopRelay({ keepMarker: true });
+      if (!tunnel) {
+        tunnel = createTunnelManager({
+          home: homeDir,
+          localPort: p.tunnelPort,
+          log: { info: logInfo, warn: logWarn },
+          onChange: (snap) => { tunnelState = snap; },
+          ...(hooks.tunnelHooks ? { hooks: hooks.tunnelHooks } : {}),
+        });
+      }
+      await tunnel.start(cfg);
+      persistAutoMarker();
+      this._markMode('tunnel');
+      return tunnel.snapshot();
+    },
+
+    stopTunnel({ keepMarker = false } = {}) {
+      tunnel?.stop();
+      tunnelState = { phase: 'idle', tool: '', detail: '', publicUrl: '', attempts: 0, nextRetryAt: null, pid: null, logs: [] };
+      const wasActiveMode = getAccessMode() === 'tunnel';
+      if (!keepMarker) {
+        if (wasActiveMode) { clearAutoMarker(); this._markMode('lan'); }
+        else if (!client?.running) clearAutoMarker();
+      }
+    },
+
+    tunnelDetect() {
+      const cfg = getTunnelConfig();
+      if (!tunnel) {
+        // 未启动过 manager 也能探测：临时建一个（stop 状态，不 spawn）
+        tunnel = createTunnelManager({
+          home: homeDir,
+          localPort: 0,
+          log: { info: () => {}, warn: () => {} },
+          onChange: (snap) => { tunnelState = snap; },
+          ...(hooks.tunnelHooks ? { hooks: hooks.tunnelHooks } : {}),
+        });
+      }
+      return tunnel.detect(cfg);
     },
 
     /** 客户端主动申请接入服务端（准入审批流）。 */
@@ -302,19 +382,28 @@ export function createRelayService({
       return enroll ? { phase: enroll.phase, detail: enroll.detail, serverUrl: enroll.serverUrl } : { phase: 'idle', detail: '' };
     },
 
-    /** 重启后自动恢复：上次开着中继就重新拉起。 */
-    async restoreRelayIfNeeded() {
+    /** 重启后自动恢复：按持久化的接入方式（mode）重新拉起；无标记则不动。 */
+    async restoreIfNeeded() {
       try {
         readFileSync(autoMarkerPath, 'utf8');
       } catch { return false; }
-      const cfg = getRelayConfig();
-      if (!cfg.url || !cfg.token) return false;
+      const mode = getAccessMode();
       try {
-        await this.startRelay();
-        logInfo('dsh-relay: relay auto-restored | 已自动恢复中继');
-        return true;
+        if (mode === 'tunnel') {
+          await this.startTunnel();
+          logInfo('dsh-relay: tunnel auto-restored | 已自动恢复外接隧道');
+          return true;
+        }
+        if (mode === 'relay') {
+          const cfg = getRelayConfig();
+          if (!cfg.url || !cfg.token) return false;
+          await this.startRelay();
+          logInfo('dsh-relay: relay auto-restored | 已自动恢复中继');
+          return true;
+        }
+        return false; // lan：无外网接入需恢复
       } catch (err) {
-        logWarn(`dsh-relay: relay auto-restore failed | 自动恢复失败: ${err?.message ?? err}`);
+        logWarn(`dsh-relay: auto-restore failed | 自动恢复失败: ${err?.message ?? err}`);
         return false;
       }
     },
@@ -325,10 +414,15 @@ export function createRelayService({
       const lanUrl = lan ? `http://${lan}:${p.port}` : null;
       const cfg = getRelayConfig();
       const publicUrl = client?.running ? publicUrlFromServer(cfg.url) : '';
+      const tSnap = tunnel?.snapshot() ?? tunnelState;
+      const tunnelUrl = tSnap.publicUrl || '';
+      const tcfg = getTunnelConfig();
       return {
         proxyRunning: true,
         proxyPort: p.port,
+        tunnelInletPort: p.tunnelPort ?? null,
         dshPort,
+        mode: getAccessMode(),
         lanUrl,
         lanQr: await qrCached(lanUrl),
         lanCandidates: allLanCandidates(),
@@ -340,12 +434,18 @@ export function createRelayService({
         relayQr: publicUrl ? await qrCached(publicUrl) : null,
         relayState,
         relayConfig: { url: cfg.url, tokenSet: Boolean(cfg.token) },
+        tunnelRunning: Boolean(tunnel?.running),
+        tunnelUrl: tunnelUrl || null,
+        tunnelQr: tunnelUrl ? await qrCached(tunnelUrl) : null,
+        tunnelState: tSnap,
+        tunnelConfig: { tool: tcfg.tool, binPath: tcfg.binPath, config: tcfg.config },
         enroll: enroll ? { phase: enroll.phase, detail: enroll.detail, serverUrl: enroll.serverUrl } : { phase: 'idle', detail: '' },
       };
     },
 
     async dispose() {
       this.stopRelay({ keepMarker: true });
+      this.stopTunnel({ keepMarker: true });
       enrollClear();
       if (proxy) {
         const p = proxy;

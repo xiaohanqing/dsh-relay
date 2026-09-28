@@ -6804,7 +6804,7 @@ var require_websocket = __commonJS({
     var EventEmitter = __require("events");
     var https = __require("https");
     var http = __require("http");
-    var net2 = __require("net");
+    var net3 = __require("net");
     var tls = __require("tls");
     var { randomBytes: randomBytes2, createHash: createHash2 } = __require("crypto");
     var { Duplex, Readable } = __require("stream");
@@ -7561,12 +7561,12 @@ var require_websocket = __commonJS({
     }
     function netConnect(options) {
       options.path = options.socketPath;
-      return net2.connect(options);
+      return net3.connect(options);
     }
     function tlsConnect(options) {
       options.path = void 0;
       if (!options.servername && options.servername !== "") {
-        options.servername = net2.isIP(options.host) ? "" : options.host;
+        options.servername = net3.isIP(options.host) ? "" : options.host;
       }
       return tls.connect(options);
     }
@@ -8251,17 +8251,17 @@ var require_websocket_server = __commonJS({
 });
 
 // src/index.js
-import { readFileSync as readFileSync3, writeFileSync as writeFileSync3, mkdirSync as mkdirSync3 } from "node:fs";
-import { join as join3, dirname as dirname3 } from "node:path";
-import { homedir as homedir3 } from "node:os";
+import { readFileSync as readFileSync3, writeFileSync as writeFileSync4, mkdirSync as mkdirSync4 } from "node:fs";
+import { join as join7, dirname as dirname3 } from "node:path";
+import { homedir as homedir4 } from "node:os";
 import { randomInt as randomInt2 } from "node:crypto";
 
 // src/service.mjs
 var import_qrcode = __toESM(require_lib(), 1);
 import { networkInterfaces, hostname as osHostname, platform as osPlatform, arch as osArch } from "node:os";
-import { readFileSync, rmSync, mkdirSync, writeFileSync } from "node:fs";
-import { join, dirname } from "node:path";
-import { homedir } from "node:os";
+import { readFileSync, rmSync, mkdirSync as mkdirSync2, writeFileSync as writeFileSync2 } from "node:fs";
+import { join as join5, dirname } from "node:path";
+import { homedir as homedir2 } from "node:os";
 
 // src/proxy.mjs
 import { createServer } from "node:http";
@@ -8479,6 +8479,7 @@ function createRelayProxy({
   lanAccessEnabled = () => true,
   launchToken = () => "",
   injectPolyfills = true,
+  tunnelPort = null,
   log = () => {
   }
 } = {}) {
@@ -8759,31 +8760,69 @@ function createRelayProxy({
   const inlet = createServer((req, res) => handleRequest(req, res, true));
   inlet.on("upgrade", (req, socket, head) => handleUpgrade(req, socket, head, true));
   track(inlet);
+  const tunnelInlet = typeof tunnelPort === "number" && tunnelPort >= 0 ? createServer((req, res) => handleRequest(req, res, true)) : null;
+  if (tunnelInlet) {
+    tunnelInlet.on("upgrade", (req, socket, head) => handleUpgrade(req, socket, head, true));
+    track(tunnelInlet);
+  }
+  function listenWithFallback(srv, want, bindHost) {
+    return new Promise((resolvePort, rejectPort) => {
+      let retries = 10;
+      let current = want;
+      const onError = (err) => {
+        if (err?.code === "EADDRINUSE" && retries > 0) {
+          retries -= 1;
+          current += 1;
+          srv.listen(current, bindHost, onListening);
+          return;
+        }
+        srv.removeListener("error", onError);
+        rejectPort(err);
+      };
+      const onListening = () => {
+        srv.removeListener("error", onError);
+        resolvePort(srv.address()?.port ?? current);
+      };
+      srv.on("error", onError);
+      srv.listen(current, bindHost, onListening);
+    });
+  }
+  const listeners = [server, inlet];
   return new Promise((resolve, reject) => {
     server.once("error", reject);
     inlet.once("error", reject);
     server.listen(port, host, () => {
       inlet.listen(0, "127.0.0.1", () => {
-        resolve({
-          server,
-          inlet,
-          port: server.address().port,
-          inletPort: inlet.address().port,
-          close: () => new Promise((r) => {
-            for (const s of sockets) {
-              try {
-                s.destroy();
-              } catch {
+        const finish = (resolvedTunnelPort) => {
+          resolve({
+            server,
+            inlet,
+            tunnelInlet,
+            port: server.address().port,
+            inletPort: inlet.address().port,
+            tunnelPort: resolvedTunnelPort,
+            // 未启用时为 null
+            close: () => new Promise((r) => {
+              for (const s of sockets) {
+                try {
+                  s.destroy();
+                } catch {
+                }
               }
-            }
-            let n = 2;
-            const done = () => {
-              if (--n === 0) r();
-            };
-            server.close(done);
-            inlet.close(done);
-          })
-        });
+              let n = listeners.length;
+              const done = () => {
+                if (--n === 0) r();
+              };
+              for (const l of listeners) l.close(done);
+            })
+          });
+        };
+        if (!tunnelInlet) return finish(null);
+        listenWithFallback(tunnelInlet, tunnelPort, "127.0.0.1").then((resolved) => {
+          tunnelInlet.on("error", (err) => log(`dsh-relay: tunnel inlet error: ${err?.message ?? err}`));
+          listeners.push(tunnelInlet);
+          finish(resolved);
+        }).catch(reject);
       });
     });
   });
@@ -9166,6 +9205,657 @@ var RelayClient = class {
   }
 };
 
+// src/tunnel.mjs
+import { spawn } from "node:child_process";
+import { mkdirSync, writeFileSync } from "node:fs";
+import { join as join4 } from "node:path";
+
+// src/tunnels/frp.mjs
+import { join as join2 } from "node:path";
+
+// src/tunnels/resolve-bin.mjs
+import { existsSync, accessSync, constants as fsConstants } from "node:fs";
+import net2 from "node:net";
+import { delimiter, isAbsolute, join, resolve as resolvePath } from "node:path";
+import { homedir, platform } from "node:os";
+function isExecutable(p) {
+  try {
+    accessSync(p, fsConstants.X_OK);
+    return existsSync(p);
+  } catch {
+    return false;
+  }
+}
+function resolveBin(name2, override = "") {
+  const exeNames = platform() === "win32" ? [`${name2}.exe`, `${name2}.cmd`, `${name2}.bat`, name2] : [name2];
+  const o = String(override ?? "").trim();
+  if (o) {
+    const p = resolvePath(o);
+    if (existsSync(p) && isExecutable(p)) return { bin: p };
+    return { bin: null, reason: `\u6307\u5B9A\u7684\u7A0B\u5E8F\u8DEF\u5F84\u4E0D\u5B58\u5728\u6216\u4E0D\u53EF\u6267\u884C\uFF1A${o} | overridden binary not found or not executable` };
+  }
+  const dirs = [
+    ...(process.env.PATH ?? "").split(delimiter).filter(Boolean),
+    join(homedir(), ".dsh", "dsh-relay", "bin")
+    // 插件托管下载目录（预留）
+  ];
+  for (const dir of dirs) {
+    for (const n of exeNames) {
+      const p = isAbsolute(n) ? n : join(dir, n);
+      if (existsSync(p) && isExecutable(p)) return { bin: p };
+    }
+  }
+  return { bin: null, reason: `\u672A\u627E\u5230 ${name2}\uFF1A\u8BF7\u5B89\u88C5\u540E\u91CD\u8BD5\uFF0C\u6216\u5728\u8BBE\u7F6E\u91CC\u624B\u52A8\u586B\u5199\u5B8C\u6574\u8DEF\u5F84 | ${name2} not found in PATH; install it or set the full path in settings` };
+}
+function freeLoopbackPort() {
+  return new Promise((res, rej) => {
+    const srv = net2.createServer();
+    srv.unref();
+    srv.on("error", rej);
+    srv.listen(0, "127.0.0.1", () => {
+      const { port } = srv.address();
+      srv.close(() => res(port));
+    });
+  });
+}
+
+// src/tunnels/frp.mjs
+var TOOL = "frpc";
+function tomlStr(v) {
+  return JSON.stringify(String(v ?? ""));
+}
+function buildFrpcToml({ config, localPort, adminPort, logFile }) {
+  const c = config ?? {};
+  const raw = String(c.rawToml ?? "").trim();
+  if (raw) {
+    if (!/serverAddr\s*=/.test(raw)) throw new Error("frpc.toml \u7F3A\u5C11 serverAddr | raw frpc.toml has no serverAddr");
+    let t = raw;
+    if (!/webServer\.port\s*=/.test(t)) {
+      t += `
+webServer.addr = "127.0.0.1"
+webServer.port = ${adminPort}
+`;
+    }
+    return t.endsWith("\n") ? t : `${t}
+`;
+  }
+  const serverAddr = String(c.serverAddr ?? "").trim();
+  if (!serverAddr) throw new Error("\u8BF7\u586B\u5199 frps \u670D\u52A1\u5668\u5730\u5740 | frps server address required");
+  const token = String(c.token ?? "").trim();
+  if (!token) throw new Error("\u8BF7\u586B\u5199 frps \u9274\u6743 token | frps auth token required");
+  const type = ["tcp", "http", "https"].includes(c.proxyType) ? c.proxyType : "tcp";
+  if (type !== "tcp" && !String(c.customDomain ?? "").trim() && !String(c.subdomain ?? "").trim()) {
+    throw new Error("http/https \u5F62\u6001\u9700\u8981\u586B\u5199\u81EA\u5B9A\u4E49\u57DF\u540D\u6216\u5B50\u57DF\u540D | custom domain or subdomain required");
+  }
+  const lines = [
+    `serverAddr = ${tomlStr(serverAddr)}`,
+    `serverPort = ${Number(c.serverPort) > 0 ? Number(c.serverPort) : 7e3}`,
+    `auth.token = ${tomlStr(token)}`,
+    `loginFailExit = false`,
+    `transport.tls.enable = ${c.tlsDisable === true ? "false" : "true"}`,
+    `webServer.addr = "127.0.0.1"`,
+    `webServer.port = ${adminPort}`,
+    `log.to = ${tomlStr(logFile)}`,
+    `log.level = "info"`,
+    `log.maxDays = 3`,
+    ``,
+    `[[proxies]]`,
+    `name = "dsh-relay"`,
+    `type = "${type}"`,
+    `localIP = "127.0.0.1"`,
+    `localPort = ${localPort}`
+  ];
+  if (type === "tcp") {
+    lines.push(`remotePort = ${Number(c.remotePort) > 0 ? Number(c.remotePort) : 0}`);
+    if (c.useEncryption !== false) lines.push(`transport.useEncryption = true`);
+  } else {
+    const domain = String(c.customDomain ?? "").trim();
+    const sub = String(c.subdomain ?? "").trim();
+    if (domain) lines.push(`customDomains = [${tomlStr(domain)}]`);
+    if (sub) lines.push(`subdomain = ${tomlStr(sub)}`);
+  }
+  return `${lines.join("\n")}
+`;
+}
+function derivePublicUrl(config = {}) {
+  const c = config;
+  const raw = String(c.rawToml ?? "").trim();
+  if (raw) return "";
+  const addr = String(c.serverAddr ?? "").trim();
+  const type = ["tcp", "http", "https"].includes(c.proxyType) ? c.proxyType : "tcp";
+  if (type === "tcp") {
+    const port = Number(c.remotePort) > 0 ? Number(c.remotePort) : 0;
+    return addr && port ? `http://${addr}:${port}` : "";
+  }
+  const domain = String(c.customDomain ?? "").trim();
+  if (!domain) return "";
+  return type === "https" ? `https://${domain}` : `http://${domain}`;
+}
+var frp = {
+  id: "frp",
+  label: "frp",
+  wantsAdminPort: true,
+  docs: {
+    zh: "\u590D\u7528\u4F60\uFF08\u6216\u670B\u53CB\uFF09\u5DF2\u6709\u7684 frp \u670D\u52A1\uFF1A\u586B frps \u5730\u5740\u3001\u7AEF\u53E3\u548C token \u5373\u53EF\u3002\u652F\u6301\u7EAF\u7AEF\u53E3\u6620\u5C04\uFF08\u6700\u901A\u7528\uFF09\u4E0E http/https \u57DF\u540D\u590D\u7528\uFF08\u9700 frps \u5F00 vhost \u7AEF\u53E3\uFF09\u3002\u4E5F\u53EF\u4EE5\u76F4\u63A5\u7C98\u8D34\u5B8C\u6574 frpc.toml\uFF08\u9AD8\u7EA7\uFF09\u3002",
+    en: "Reuse an existing frp server: fill in the frps address, port and token. Supports plain TCP port mapping (most universal) and http/https vhost (requires vhost ports on frps). Or paste a full frpc.toml (advanced).",
+    download: {
+      zh: "frp \u5B98\u65B9\u4E0B\u8F7D\uFF08\u56FD\u5185\u6E90 gofrp.net\uFF0C\u5907\u7528 GitHub Releases\uFF09\uFF1A\u4E0B\u8F7D\u540E\u628A frpc \u653E\u8FDB PATH \u6216\u5728\u4E0B\u65B9\u586B\u5199\u5B8C\u6574\u8DEF\u5F84\u3002",
+      en: "Download frp (gofrp.net mirror, or GitHub Releases), then put frpc on PATH or set the full path below."
+    },
+    downloadUrl: "https://gofrp.org/zh-cn/docs/download/"
+  },
+  resolveBin(config = {}) {
+    return resolveBin(TOOL, config.binPath);
+  },
+  /** 纯函数：产出落盘文件与启动参数（不碰文件系统，便于单测）。 */
+  launch({ config = {}, localPort, dir, adminPort }) {
+    const toml = buildFrpcToml({ config, localPort, adminPort, logFile: join2(dir, "frpc.log") });
+    return {
+      args: ["-c", join2(dir, "frpc.toml")],
+      env: null,
+      files: [{ path: join2(dir, "frpc.toml"), content: toml }]
+    };
+  },
+  /** 启动前预检：frpc verify 校验配置合法性（版本过老没有 verify 时跳过并提示）。 */
+  async verify({ bin, files, spawnImpl }) {
+    const toml = files?.find((f) => f.path.endsWith(".toml"));
+    if (!toml) return { ok: true };
+    return await new Promise((res) => {
+      let out = "";
+      let p;
+      try {
+        p = spawnImpl(bin, ["verify", "-c", toml.path], { timeout: 15e3 });
+      } catch (err) {
+        res({ ok: false, detail: `\u65E0\u6CD5\u6267\u884C frpc\uFF1A${err.message}` });
+        return;
+      }
+      p.stdout?.on("data", (d) => {
+        out += d;
+      });
+      p.stderr?.on("data", (d) => {
+        out += d;
+      });
+      p.on("error", (err) => {
+        res({ ok: true, note: `frpc verify \u4E0D\u53EF\u7528\uFF08${err.message}\uFF09\uFF0C\u8DF3\u8FC7\u9884\u68C0` });
+      });
+      p.on("exit", (code) => {
+        if (code === 0) res({ ok: true });
+        else res({ ok: false, detail: `frpc verify \u6821\u9A8C\u5931\u8D25\uFF1A${out.trim().slice(-400) || `exit ${code}`}` });
+      });
+    });
+  },
+  derivePublicUrl
+};
+
+// src/tunnels/cloudflared.mjs
+var QUICK_URL_RE = /(https:\/\/[a-z0-9-]+\.trycloudflare\.com)/i;
+var cloudflared = {
+  id: "cloudflared",
+  label: "Cloudflare Tunnel",
+  wantsAdminPort: false,
+  docs: {
+    zh: "\u65E0\u9700\u4EFB\u4F55\u670D\u52A1\u5668\u4E0E\u8D26\u53F7\uFF08quick \u6A21\u5F0F\uFF09\uFF1A\u542F\u52A8\u5373\u5F97\u4E00\u4E2A\u4E34\u65F6 HTTPS \u57DF\u540D\u3002\u9002\u5408\u300C\u5C31\u662F\u4E0D\u60F3\u90E8\u7F72\u300D\u7684\u573A\u666F\uFF1B\u7F3A\u70B9\u662F\u57DF\u540D\u968F\u673A\u3001\u56FD\u5185\u8FDE\u901A\u6027\u770B\u7F51\u7EDC\u73AF\u5883\u3002\u6709 Cloudflare \u8D26\u53F7\u53EF\u586B tunnel token \u83B7\u5F97\u56FA\u5B9A\u57DF\u540D\u3002",
+    en: "No server, no account needed (quick mode): get a temporary HTTPS URL instantly. Fixed domain available with a Cloudflare tunnel token.",
+    download: {
+      zh: "\u4ECE Cloudflare \u5B98\u7F51\u4E0B\u8F7D cloudflared \u5355\u6587\u4EF6\u4E8C\u8FDB\u5236\uFF0C\u653E\u8FDB PATH \u6216\u5728\u4E0B\u65B9\u586B\u5199\u5B8C\u6574\u8DEF\u5F84\u3002",
+      en: "Download the cloudflared binary from Cloudflare, put it on PATH or set the full path below."
+    },
+    downloadUrl: "https://developers.cloudflare.com/cloudflare-one/connections/connect-networks/downloads/"
+  },
+  resolveBin(config = {}) {
+    return resolveBin("cloudflared", config.binPath);
+  },
+  launch({ config = {}, localPort }) {
+    const token = String(config.token ?? "").trim();
+    if (token) {
+      return {
+        args: ["tunnel", "--no-autoupdate", "run"],
+        env: { TUNNEL_TOKEN: token },
+        files: []
+      };
+    }
+    return {
+      args: ["tunnel", "--no-autoupdate", "--url", `http://127.0.0.1:${localPort}`],
+      env: null,
+      files: []
+    };
+  },
+  /** 从输出行提取 quick tunnel 域名。 */
+  parseLine(line) {
+    const m = QUICK_URL_RE.exec(String(line ?? ""));
+    return m ? { publicUrl: m[1] } : null;
+  },
+  derivePublicUrl() {
+    return "";
+  }
+  // 动态分配，只能从日志拿
+};
+
+// src/tunnels/natapp.mjs
+var FWD_URL_RE = /(https?:\/\/[^\s"'<>]+)\s*->/;
+var natapp = {
+  id: "natapp",
+  label: "natapp",
+  wantsAdminPort: false,
+  docs: {
+    zh: "\u56FD\u5185\u7A7F\u900F\u670D\u52A1\uFF08 natapp.cn \uFF09\uFF1A\u6CE8\u518C\u540E\u5728\u540E\u53F0\u590D\u5236\u96A7\u9053 authtoken \u586B\u5165\u5373\u53EF\u3002\u514D\u8D39\u96A7\u9053\u9650 1Mbps \u5E26\u5BBD\u3001\u968F\u673A\u57DF\u540D\uFF1B\u4ED8\u8D39\u96A7\u9053\u66F4\u5FEB\u3001\u57DF\u540D\u56FA\u5B9A\u3002",
+    en: "China-friendly tunnel service: paste the tunnel authtoken from natapp.cn. Free tunnels are 1Mbps with random domains.",
+    download: {
+      zh: "\u4ECE natapp.cn \u4E0B\u8F7D\u5BA2\u6237\u7AEF\uFF0C\u653E\u8FDB PATH \u6216\u5728\u4E0B\u65B9\u586B\u5199\u5B8C\u6574\u8DEF\u5F84\u3002",
+      en: "Download the natapp client from natapp.cn, put it on PATH or set the full path below."
+    },
+    downloadUrl: "https://natapp.cn/#download"
+  },
+  resolveBin(config = {}) {
+    return resolveBin("natapp", config.binPath);
+  },
+  launch({ config = {}, localPort }) {
+    const token = String(config.authtoken ?? "").trim();
+    if (!token) throw new Error("\u8BF7\u586B\u5199 natapp \u96A7\u9053 authtoken | natapp authtoken required");
+    return {
+      args: [`-authtoken=${token}`, "-log=stdout"],
+      env: null,
+      files: []
+    };
+  },
+  parseLine(line) {
+    const m = FWD_URL_RE.exec(String(line ?? ""));
+    return m ? { publicUrl: m[1] } : null;
+  },
+  derivePublicUrl() {
+    return "";
+  }
+};
+
+// src/tunnels/custom.mjs
+import { join as join3 } from "node:path";
+function splitCommand(line) {
+  const out = [];
+  let cur = "";
+  let has = false;
+  let q = null;
+  for (let i = 0; i < line.length; i++) {
+    const ch = line[i];
+    if (q) {
+      if (ch === "\\" && q === '"' && i + 1 < line.length) {
+        cur += line[++i];
+        continue;
+      }
+      if (ch === q) {
+        q = null;
+        continue;
+      }
+      cur += ch;
+      continue;
+    }
+    if (ch === '"' || ch === "'") {
+      q = ch;
+      has = true;
+      continue;
+    }
+    if (ch === "\\" && i + 1 < line.length) {
+      cur += line[++i];
+      has = true;
+      continue;
+    }
+    if (ch === " " || ch === "	") {
+      if (has || cur) {
+        out.push(cur);
+        cur = "";
+        has = false;
+      }
+      continue;
+    }
+    cur += ch;
+    has = true;
+  }
+  if (q) throw new Error("\u547D\u4EE4\u91CC\u7684\u5F15\u53F7\u6CA1\u6709\u95ED\u5408 | unclosed quote in command");
+  if (has || cur) out.push(cur);
+  return out;
+}
+var custom = {
+  id: "custom",
+  label: "Custom command",
+  wantsAdminPort: false,
+  docs: {
+    zh: "\u4EFB\u4F55\u96A7\u9053\u5DE5\u5177\u90FD\u80FD\u63A5\uFF1A\u586B\u542F\u52A8\u547D\u4EE4\uFF08\u652F\u6301 {{port}} / {{configFile}} \u5360\u4F4D\u7B26\uFF09\uFF0C\u53EF\u9009\u914D\u7F6E\u6587\u4EF6\u6A21\u677F\u3002\u4F8B\uFF1Abore local {{port}} --to bore.pub\uFF1Brathole client.toml\uFF08\u914D\u7F6E\u6A21\u677F\u91CC\u5199 local_port = {{port}}\uFF09\u3002",
+    en: "Bring any tunnel tool: provide the launch command (supports {{port}} / {{configFile}} placeholders) and an optional config file template.",
+    download: {
+      zh: "\u81EA\u884C\u51C6\u5907\u76EE\u6807\u5DE5\u5177\u7684\u4E8C\u8FDB\u5236\uFF0C\u547D\u4EE4\u91CC\u76F4\u63A5\u5199\u5B8C\u6574\u8DEF\u5F84\u6700\u7A33\u59A5\u3002",
+      en: "Prepare the tool binary yourself; prefer the full path in the command."
+    },
+    downloadUrl: ""
+  },
+  /**
+   * 命令首词即二进制：裸名走 PATH 解析，绝对/相对路径校验存在性。
+   * config.binPath 覆盖首词。
+   */
+  resolveBin(config = {}) {
+    const cmd = String(config.command ?? "").trim();
+    if (!cmd) return { bin: null, reason: "\u8BF7\u586B\u5199\u542F\u52A8\u547D\u4EE4 | launch command required" };
+    let words;
+    try {
+      words = splitCommand(cmd);
+    } catch (err) {
+      return { bin: null, reason: err.message };
+    }
+    if (!words.length) return { bin: null, reason: "\u542F\u52A8\u547D\u4EE4\u4E3A\u7A7A | empty command" };
+    const bare = words[0];
+    if (config.binPath) return resolveBin(bare, config.binPath);
+    if (/[/\\]/.test(bare)) return resolveBin(bare, bare);
+    return resolveBin(bare, "");
+  },
+  launch({ config = {}, localPort, dir }) {
+    const cmd = String(config.command ?? "").trim();
+    if (!cmd) throw new Error("\u8BF7\u586B\u5199\u542F\u52A8\u547D\u4EE4 | launch command required");
+    let configFile = "";
+    const files = [];
+    const template = String(config.configTemplate ?? "");
+    if (template.trim()) {
+      const fileName = String(config.configFileName ?? "").trim() || "custom-config.txt";
+      configFile = join3(dir, fileName.replace(/[^\w.-]+/g, "_"));
+      files.push({ path: configFile, content: template.replaceAll("{{port}}", String(localPort)) });
+    }
+    const rendered = cmd.replaceAll("{{port}}", String(localPort)).replaceAll("{{configFile}}", configFile);
+    const words = splitCommand(rendered);
+    if (!words.length) throw new Error("\u542F\u52A8\u547D\u4EE4\u4E3A\u7A7A | empty command");
+    return { args: words.slice(1), env: null, files };
+  },
+  parseLine() {
+    return null;
+  },
+  derivePublicUrl(config = {}) {
+    return String(config.publicUrl ?? "").trim();
+  }
+};
+
+// src/tunnels/index.mjs
+var ADAPTERS = { frp, cloudflared, natapp, custom };
+function getAdapter(id) {
+  return ADAPTERS[id] ?? null;
+}
+function listAdapters() {
+  return Object.values(ADAPTERS);
+}
+
+// src/tunnel.mjs
+var BACKOFF_BASE_MS = 1e3;
+var BACKOFF_CAP_MS = 6e4;
+var STABLE_RESET_MS = 6e4;
+var KILL_GRACE_MS_DEFAULT = 5e3;
+var LOG_LINES_MAX = 50;
+function backoffMs2(attempt) {
+  const raw = Math.min(BACKOFF_BASE_MS * 2 ** Math.max(0, attempt - 1), BACKOFF_CAP_MS);
+  return Math.min(Math.floor(raw * (0.8 + Math.random() * 0.4)), BACKOFF_CAP_MS);
+}
+function createTunnelManager({ home, localPort, onChange = () => {
+}, log = () => {
+}, hooks = {} }) {
+  const spawnImpl = hooks.spawnImpl ?? spawn;
+  const killImpl = hooks.killImpl ?? defaultKill;
+  const nowImpl = hooks.nowImpl ?? Date.now;
+  const freePortImpl = hooks.freePortImpl ?? freeLoopbackPort;
+  const killGraceMs = hooks.killGraceMs ?? KILL_GRACE_MS_DEFAULT;
+  const logInfo = (...a) => (log.info ?? log.log).call(log, ...a);
+  const logWarn = (...a) => {
+    if (typeof log.warn === "function") log.warn(...a);
+    else console.warn(...a);
+  };
+  function defaultKill(pid, sig) {
+    try {
+      process.kill(-pid, sig);
+    } catch {
+    }
+  }
+  let stopped = true;
+  let adapter = null;
+  let cfg = null;
+  let bin = "";
+  let child = null;
+  let attempt = 0;
+  let startedAt = 0;
+  let retryTimer = null;
+  let killTimer = null;
+  let exiting = false;
+  let outBuf = "";
+  const logs = [];
+  let snap = {
+    phase: "idle",
+    // idle | starting | running | backoff | error
+    tool: "",
+    detail: "",
+    publicUrl: "",
+    attempts: 0,
+    nextRetryAt: null,
+    pid: null,
+    binPath: "",
+    logs: []
+  };
+  function emit(patch) {
+    snap = { ...snap, ...patch, logs: logs.slice(-8) };
+    onChange({ ...snap });
+  }
+  function pushLog(line) {
+    const t = String(line ?? "").replace(/\s+$/, "");
+    if (!t) return;
+    logs.push(t);
+    if (logs.length > LOG_LINES_MAX) logs.shift();
+    const found = adapter?.parseLine?.(t);
+    if (found?.publicUrl && found.publicUrl !== snap.publicUrl) {
+      emit({ publicUrl: found.publicUrl, detail: `\u5DF2\u83B7\u53D6\u516C\u7F51\u5730\u5740 ${found.publicUrl}` });
+      logInfo(`dsh-relay: tunnel public url ${found.publicUrl}`);
+    }
+  }
+  function onOutput(chunk) {
+    outBuf += chunk;
+    let idx;
+    while ((idx = outBuf.indexOf("\n")) >= 0) {
+      pushLog(outBuf.slice(0, idx));
+      outBuf = outBuf.slice(idx + 1);
+    }
+    if (outBuf.length > 16 * 1024) {
+      pushLog(outBuf);
+      outBuf = "";
+    }
+  }
+  function handleExit(why) {
+    if (exiting) return;
+    exiting = true;
+    const c = child;
+    child = null;
+    if (killTimer) {
+      clearTimeout(killTimer);
+      killTimer = null;
+    }
+    if (stopped) {
+      emit({ phase: "idle", pid: null, detail: "" });
+      return;
+    }
+    if (nowImpl() - startedAt >= STABLE_RESET_MS) attempt = 0;
+    attempt += 1;
+    const delay = backoffMs2(attempt);
+    const nextAt = nowImpl() + delay;
+    const secs = Math.round(delay / 1e3);
+    emit({
+      phase: "backoff",
+      pid: null,
+      detail: `\u8FDB\u7A0B\u9000\u51FA\uFF08${why}\uFF09\uFF0C${secs}s \u540E\u7B2C ${attempt} \u6B21\u91CD\u542F | exited (${why}); restart #${attempt} in ${secs}s`,
+      attempts: attempt,
+      nextRetryAt: nextAt
+    });
+    logWarn(`dsh-relay: tunnel process exited (${why}); retry in ${delay}ms`);
+    retryTimer = setTimeout(() => {
+      retryTimer = null;
+      void _start();
+    }, delay);
+    retryTimer.unref?.();
+  }
+  async function _start() {
+    if (stopped) return;
+    if (child) return;
+    exiting = false;
+    outBuf = "";
+    const dir = join4(home, "dsh-relay", "tunnel", cfg.tool);
+    try {
+      mkdirSync(dir, { recursive: true });
+    } catch (err) {
+      stopped = true;
+      emit({ phase: "error", detail: `\u65E0\u6CD5\u521B\u5EFA\u96A7\u9053\u5DE5\u4F5C\u76EE\u5F55\uFF1A${err.message}` });
+      return;
+    }
+    const adminPort = adapter.wantsAdminPort ? await freePortImpl().catch(() => 0) : 0;
+    let plan;
+    try {
+      plan = adapter.launch({ config: cfg.config, bin, localPort, dir, adminPort });
+    } catch (err) {
+      stopped = true;
+      emit({ phase: "error", detail: err.message });
+      return;
+    }
+    for (const f of plan.files ?? []) {
+      try {
+        writeFileSync(f.path, f.content, { mode: 384 });
+      } catch (err) {
+        stopped = true;
+        emit({ phase: "error", detail: `\u65E0\u6CD5\u5199\u5165\u914D\u7F6E\u6587\u4EF6 ${f.path}\uFF1A${err.message}` });
+        return;
+      }
+    }
+    if (typeof adapter.verify === "function") {
+      const v = await adapter.verify({ bin, files: plan.files, spawnImpl });
+      if (v?.note) logInfo(`dsh-relay: ${v.note}`);
+      if (v && v.ok === false) {
+        stopped = true;
+        emit({ phase: "error", detail: v.detail ?? "\u914D\u7F6E\u6821\u9A8C\u5931\u8D25 | config verification failed" });
+        return;
+      }
+    }
+    startedAt = nowImpl();
+    let p;
+    try {
+      p = spawnImpl(bin, plan.args, {
+        stdio: ["ignore", "pipe", "pipe"],
+        ...plan.env ? { env: { ...process.env, ...plan.env } } : {},
+        detached: process.platform !== "win32",
+        windowsHide: true
+      });
+    } catch (err) {
+      handleExit(`spawn: ${err.message}`);
+      return;
+    }
+    child = p;
+    emit({
+      phase: "running",
+      pid: p.pid,
+      detail: adapter.derivePublicUrl?.(cfg.config) ? `\u5DF2\u542F\u52A8 ${cfg.tool}` : "\u5DF2\u542F\u52A8\uFF0C\u7B49\u5F85\u516C\u7F51\u5730\u5740\u2026 | started, waiting for public url\u2026",
+      binPath: bin
+    });
+    logInfo(`dsh-relay: tunnel ${cfg.tool} started (pid ${p.pid})`);
+    p.stdout?.setEncoding?.("utf8");
+    p.stderr?.setEncoding?.("utf8");
+    p.stdout?.on("data", onOutput);
+    p.stderr?.on("data", onOutput);
+    p.on("exit", (code, signal) => handleExit(signal ? `signal ${signal}` : `code ${code}`));
+    p.on("error", (err) => handleExit(err.message));
+  }
+  return {
+    /**
+     * 启动（幂等：同配置且在跑则直接返回）。配置错误会抛出（含未找到二进制）。
+     * @param {{tool:string, binPath?:string, config?:object}} next
+     */
+    async start(next) {
+      const ad = getAdapter(next?.tool);
+      if (!ad) throw new Error(`\u672A\u77E5\u96A7\u9053\u5DE5\u5177 | unknown tunnel tool: ${next?.tool}`);
+      const nextKey = JSON.stringify([next.tool, next.binPath ?? "", next.config ?? {}]);
+      if (!stopped && child && adapter === ad && nextKey === this._cfgKey) return this.snapshot();
+      this.stop();
+      stopped = false;
+      adapter = ad;
+      cfg = { tool: next.tool, config: next.config ?? {} };
+      this._cfgKey = nextKey;
+      attempt = 0;
+      logs.length = 0;
+      emit({ phase: "starting", tool: next.tool, detail: "\u5B9A\u4F4D\u7A0B\u5E8F\u5E76\u51C6\u5907\u914D\u7F6E\u2026 | resolving binary\u2026", publicUrl: "", attempts: 0, nextRetryAt: null, pid: null });
+      const rb = ad.resolveBin(cfg.config);
+      if (!rb.bin) {
+        stopped = true;
+        emit({ phase: "error", detail: rb.reason, binPath: "" });
+        throw new Error(rb.reason);
+      }
+      bin = rb.bin;
+      emit({ binPath: bin });
+      await this._start();
+      return this.snapshot();
+    },
+    _start,
+    /** 停止并收割进程组。 */
+    stop() {
+      stopped = true;
+      if (retryTimer) {
+        clearTimeout(retryTimer);
+        retryTimer = null;
+      }
+      const c = child;
+      child = null;
+      if (c) {
+        const pid = c.pid;
+        try {
+          killImpl(pid, "SIGTERM");
+        } catch {
+          try {
+            c.kill("SIGTERM");
+          } catch {
+          }
+        }
+        if (killTimer) clearTimeout(killTimer);
+        killTimer = setTimeout(() => {
+          killTimer = null;
+          try {
+            killImpl(pid, "SIGKILL");
+          } catch {
+            try {
+              c.kill("SIGKILL");
+            } catch {
+            }
+          }
+        }, killGraceMs);
+        killTimer.unref?.();
+      }
+      emit({ phase: "idle", pid: null, detail: "", publicUrl: "", attempts: 0, nextRetryAt: null });
+    },
+    dispose() {
+      this.stop();
+    },
+    /** 探测各工具在本机的可用性（设置页工具选择用）。 */
+    detect(currentConfig = {}) {
+      return listAdapters().map((a) => {
+        const binPath = a.id === currentConfig.tool ? String(currentConfig.binPath ?? "") : "";
+        let r;
+        try {
+          r = a.resolveBin({ ...currentConfig.config, binPath });
+        } catch {
+          r = { bin: null, reason: "detect failed" };
+        }
+        return {
+          id: a.id,
+          label: a.label,
+          available: Boolean(r.bin),
+          binPath: r.bin ?? "",
+          reason: r.bin ? "" : r.reason ?? "not found",
+          docs: a.docs
+        };
+      });
+    },
+    snapshot() {
+      return { ...snap, logs: [...snap.logs] };
+    },
+    get running() {
+      return !stopped && Boolean(child);
+    },
+    _cfgKey: ""
+  };
+}
+
 // src/service.mjs
 function qrDataUrl(text, { width = 220, margin = 1 } = {}) {
   return import_qrcode.default.toDataURL(text, { errorCorrectionLevel: "M", margin, width, type: "image/png" });
@@ -9214,6 +9904,16 @@ function createRelayService({
   getRelayConfig = () => ({ url: "", token: "", enabled: false }),
   saveRelayConfig = null,
   // async ({ url, token }) => void：准入批准/密钥轮换时持久化
+  // ---- 外接隧道模式 ----
+  getTunnelConfig = () => ({ tool: "frp", binPath: "", config: {} }),
+  getTunnelInletPort = () => 0,
+  // 0 = 用默认 3083
+  saveTunnelInletPort = null,
+  // (actualPort) => void：注入口被占漂移后持久化实际值
+  getAccessMode = () => "relay",
+  // 'relay' | 'tunnel' | 'lan'
+  setAccessMode: setAccessMode2 = null,
+  // (mode) => void：启动/停止时同步持久化
   pluginVersion = "",
   onRelayReady = () => {
   },
@@ -9222,22 +9922,27 @@ function createRelayService({
   log = console
 } = {}) {
   const logInfo = (...a) => (log.info ?? log.log).call(log, ...a);
-  const logWarn = (...a) => log.warn?.(...a) ?? console.warn(...a);
+  const logWarn = (...a) => {
+    if (typeof log.warn === "function") log.warn(...a);
+    else console.warn(...a);
+  };
   const createProxyFn = hooks.createProxy ?? createRelayProxy;
   const RelayClientCls = hooks.RelayClient ?? RelayClient;
   const qr = hooks.qrDataUrl ?? qrDataUrl;
   let proxy = null;
   let client = null;
+  let tunnel = null;
   let relayState = { phase: "idle", detail: "", attempts: 0, nextRetryAt: null, server: null };
+  let tunnelState = { phase: "idle", tool: "", detail: "", publicUrl: "", attempts: 0, nextRetryAt: null, pid: null, logs: [] };
   const qrCache = /* @__PURE__ */ new Map();
   let lanCache = null;
   const sessionKey = hooks.sessionKey ?? `${Date.now().toString(36)}-${Math.random().toString(36).slice(2)}`;
-  const homeDir2 = home ?? process.env.DSH_HOME ?? join(homedir(), ".dsh");
-  const autoMarkerPath = join(homeDir2, "dsh-relay", "relay-auto.json");
+  const homeDir2 = home ?? process.env.DSH_HOME ?? join5(homedir2(), ".dsh");
+  const autoMarkerPath = join5(homeDir2, "dsh-relay", "relay-auto.json");
   function persistAutoMarker() {
     try {
-      mkdirSync(dirname(autoMarkerPath), { recursive: true });
-      writeFileSync(autoMarkerPath, JSON.stringify({ at: Date.now() }), "utf8");
+      mkdirSync2(dirname(autoMarkerPath), { recursive: true });
+      writeFileSync2(autoMarkerPath, JSON.stringify({ at: Date.now() }), "utf8");
     } catch {
     }
   }
@@ -9379,7 +10084,7 @@ function createRelayService({
   }
   const api = {
     dshPort,
-    /** 启动本地代理（幂等）。端口被占自动 +1 重试。 */
+    /** 启动本地代理（幂等）。端口被占自动 +1 重试；同时拉起稳定隧道注入口。 */
     async startProxy() {
       if (proxy) return proxy;
       let lastErr = null;
@@ -9395,9 +10100,17 @@ function createRelayService({
               isProtected: (kind) => kind === "public" ? true : getLanAuthEnabled()
             },
             lanAccessEnabled: () => getLanEnabled(),
-            launchToken
+            launchToken,
+            tunnelPort: getTunnelInletPort() || 3083
           });
           if (p !== port) logInfo(`dsh-relay: port ${port} busy, proxy on ${p} | \u7AEF\u53E3\u88AB\u5360\uFF0C\u6539\u7528 ${p}`);
+          if (proxy.tunnelPort && proxy.tunnelPort !== (getTunnelInletPort() || 3083)) {
+            logInfo(`dsh-relay: tunnel inlet drifted to ${proxy.tunnelPort} | \u96A7\u9053\u6CE8\u5165\u53E3\u88AB\u5360\uFF0C\u6539\u7528 ${proxy.tunnelPort}`);
+            try {
+              saveTunnelInletPort?.(proxy.tunnelPort);
+            } catch {
+            }
+          }
           return proxy;
         } catch (err) {
           if (err?.code !== "EADDRINUSE") throw err;
@@ -9406,14 +10119,18 @@ function createRelayService({
       }
       throw lastErr ?? new Error("proxy start failed");
     },
-    /** 开启中继（幂等）。 */
+    /** 开启中继（幂等）。中继与外接隧道互斥：开中继先停隧道。 */
     async startRelay() {
       const cfg = getRelayConfig();
       if (!cfg.url || !cfg.token) {
         throw new Error("\u8BF7\u5148\u5728\u8BBE\u7F6E\u91CC\u586B\u5199\u670D\u52A1\u7AEF\u5730\u5740\u548C\u5BC6\u94A5\u4E32 | set the relay server address and secret first");
       }
       const p = await this.startProxy();
-      if (client?.running) return publicUrlFromServer(cfg.url);
+      if (client?.running) {
+        this._markMode("relay");
+        return publicUrlFromServer(cfg.url);
+      }
+      this.stopTunnel({ keepMarker: true });
       client = new RelayClientCls({
         serverUrl: cfg.url,
         token: cfg.token,
@@ -9435,13 +10152,78 @@ function createRelayService({
       });
       client.start();
       persistAutoMarker();
+      this._markMode("relay");
       return publicUrlFromServer(cfg.url);
     },
     stopRelay({ keepMarker = false } = {}) {
       client?.stop();
       client = null;
       relayState = { phase: "idle", detail: "", attempts: 0, nextRetryAt: null, server: null };
-      if (!keepMarker) clearAutoMarker();
+      const wasActiveMode = getAccessMode() === "relay";
+      if (!keepMarker) {
+        if (wasActiveMode) {
+          clearAutoMarker();
+          this._markMode("lan");
+        } else if (!tunnel?.running) clearAutoMarker();
+      }
+    },
+    // ---------- 外接隧道（frp / cloudflared / natapp / 自定义） ----------
+    _markMode(mode) {
+      try {
+        setAccessMode2?.(mode);
+      } catch (err) {
+        logWarn(`dsh-relay: persist access mode failed: ${err?.message ?? err}`);
+      }
+    },
+    /** 开启外接隧道（幂等）。与中继互斥：开隧道先停中继。 */
+    async startTunnel() {
+      const p = await this.startProxy();
+      if (!p.tunnelPort) throw new Error("\u96A7\u9053\u6CE8\u5165\u53E3\u672A\u542F\u52A8 | tunnel inlet not available");
+      const cfg = getTunnelConfig();
+      this.stopRelay({ keepMarker: true });
+      if (!tunnel) {
+        tunnel = createTunnelManager({
+          home: homeDir2,
+          localPort: p.tunnelPort,
+          log: { info: logInfo, warn: logWarn },
+          onChange: (snap) => {
+            tunnelState = snap;
+          },
+          ...hooks.tunnelHooks ? { hooks: hooks.tunnelHooks } : {}
+        });
+      }
+      await tunnel.start(cfg);
+      persistAutoMarker();
+      this._markMode("tunnel");
+      return tunnel.snapshot();
+    },
+    stopTunnel({ keepMarker = false } = {}) {
+      tunnel?.stop();
+      tunnelState = { phase: "idle", tool: "", detail: "", publicUrl: "", attempts: 0, nextRetryAt: null, pid: null, logs: [] };
+      const wasActiveMode = getAccessMode() === "tunnel";
+      if (!keepMarker) {
+        if (wasActiveMode) {
+          clearAutoMarker();
+          this._markMode("lan");
+        } else if (!client?.running) clearAutoMarker();
+      }
+    },
+    tunnelDetect() {
+      const cfg = getTunnelConfig();
+      if (!tunnel) {
+        tunnel = createTunnelManager({
+          home: homeDir2,
+          localPort: 0,
+          log: { info: () => {
+          }, warn: () => {
+          } },
+          onChange: (snap) => {
+            tunnelState = snap;
+          },
+          ...hooks.tunnelHooks ? { hooks: hooks.tunnelHooks } : {}
+        });
+      }
+      return tunnel.detect(cfg);
     },
     /** 客户端主动申请接入服务端（准入审批流）。 */
     async enroll(serverUrl, code = "") {
@@ -9453,21 +10235,30 @@ function createRelayService({
     enrollState() {
       return enroll ? { phase: enroll.phase, detail: enroll.detail, serverUrl: enroll.serverUrl } : { phase: "idle", detail: "" };
     },
-    /** 重启后自动恢复：上次开着中继就重新拉起。 */
-    async restoreRelayIfNeeded() {
+    /** 重启后自动恢复：按持久化的接入方式（mode）重新拉起；无标记则不动。 */
+    async restoreIfNeeded() {
       try {
         readFileSync(autoMarkerPath, "utf8");
       } catch {
         return false;
       }
-      const cfg = getRelayConfig();
-      if (!cfg.url || !cfg.token) return false;
+      const mode = getAccessMode();
       try {
-        await this.startRelay();
-        logInfo("dsh-relay: relay auto-restored | \u5DF2\u81EA\u52A8\u6062\u590D\u4E2D\u7EE7");
-        return true;
+        if (mode === "tunnel") {
+          await this.startTunnel();
+          logInfo("dsh-relay: tunnel auto-restored | \u5DF2\u81EA\u52A8\u6062\u590D\u5916\u63A5\u96A7\u9053");
+          return true;
+        }
+        if (mode === "relay") {
+          const cfg = getRelayConfig();
+          if (!cfg.url || !cfg.token) return false;
+          await this.startRelay();
+          logInfo("dsh-relay: relay auto-restored | \u5DF2\u81EA\u52A8\u6062\u590D\u4E2D\u7EE7");
+          return true;
+        }
+        return false;
       } catch (err) {
-        logWarn(`dsh-relay: relay auto-restore failed | \u81EA\u52A8\u6062\u590D\u5931\u8D25: ${err?.message ?? err}`);
+        logWarn(`dsh-relay: auto-restore failed | \u81EA\u52A8\u6062\u590D\u5931\u8D25: ${err?.message ?? err}`);
         return false;
       }
     },
@@ -9477,10 +10268,15 @@ function createRelayService({
       const lanUrl = lan ? `http://${lan}:${p.port}` : null;
       const cfg = getRelayConfig();
       const publicUrl = client?.running ? publicUrlFromServer(cfg.url) : "";
+      const tSnap = tunnel?.snapshot() ?? tunnelState;
+      const tunnelUrl = tSnap.publicUrl || "";
+      const tcfg = getTunnelConfig();
       return {
         proxyRunning: true,
         proxyPort: p.port,
+        tunnelInletPort: p.tunnelPort ?? null,
         dshPort,
+        mode: getAccessMode(),
         lanUrl,
         lanQr: await qrCached(lanUrl),
         lanCandidates: allLanCandidates(),
@@ -9492,11 +10288,17 @@ function createRelayService({
         relayQr: publicUrl ? await qrCached(publicUrl) : null,
         relayState,
         relayConfig: { url: cfg.url, tokenSet: Boolean(cfg.token) },
+        tunnelRunning: Boolean(tunnel?.running),
+        tunnelUrl: tunnelUrl || null,
+        tunnelQr: tunnelUrl ? await qrCached(tunnelUrl) : null,
+        tunnelState: tSnap,
+        tunnelConfig: { tool: tcfg.tool, binPath: tcfg.binPath, config: tcfg.config },
         enroll: enroll ? { phase: enroll.phase, detail: enroll.detail, serverUrl: enroll.serverUrl } : { phase: "idle", detail: "" }
       };
     },
     async dispose() {
       this.stopRelay({ keepMarker: true });
+      this.stopTunnel({ keepMarker: true });
       enrollClear();
       if (proxy) {
         const p = proxy;
@@ -9651,9 +10453,9 @@ function installRpc(ctx, { channel, handler, log = console }) {
 }
 
 // src/settings.mjs
-import { readFileSync as readFileSync2, writeFileSync as writeFileSync2, mkdirSync as mkdirSync2, rmSync as rmSync2 } from "node:fs";
-import { join as join2, dirname as dirname2 } from "node:path";
-import { homedir as homedir2 } from "node:os";
+import { readFileSync as readFileSync2, writeFileSync as writeFileSync3, mkdirSync as mkdirSync3, rmSync as rmSync2 } from "node:fs";
+import { join as join6, dirname as dirname2 } from "node:path";
+import { homedir as homedir3 } from "node:os";
 
 // src/ip.mjs
 function isValidIpv4(value) {
@@ -9664,9 +10466,9 @@ function isValidIpv4(value) {
 }
 
 // src/settings.mjs
-var SETTINGS_REL = join2("dsh-relay", "settings.json");
+var SETTINGS_REL = join6("dsh-relay", "settings.json");
 function settingsPath() {
-  return join2(process.env.DSH_HOME ?? join2(homedir2(), ".dsh"), SETTINGS_REL);
+  return join6(process.env.DSH_HOME ?? join6(homedir3(), ".dsh"), SETTINGS_REL);
 }
 function read() {
   try {
@@ -9678,8 +10480,8 @@ function read() {
 }
 function write(s) {
   try {
-    mkdirSync2(dirname2(settingsPath()), { recursive: true });
-    writeFileSync2(settingsPath(), JSON.stringify(s, null, 2), { mode: 384 });
+    mkdirSync3(dirname2(settingsPath()), { recursive: true });
+    writeFileSync3(settingsPath(), JSON.stringify(s, null, 2), { mode: 384 });
   } catch {
   }
   return s;
@@ -9755,6 +10557,56 @@ function proxyPort() {
   const v = Number(read().proxyPort);
   return Number.isInteger(v) && v >= 1 && v <= 65535 ? v : 0;
 }
+var MODES = /* @__PURE__ */ new Set(["relay", "tunnel", "lan"]);
+function accessMode() {
+  const s = read();
+  if (MODES.has(s.mode)) return s.mode;
+  return s.relayEnabled === true ? "relay" : "lan";
+}
+function setAccessMode(mode) {
+  if (!MODES.has(mode)) throw new Error(`\u672A\u77E5\u63A5\u5165\u65B9\u5F0F | unknown access mode: ${mode}`);
+  const s = read();
+  s.mode = mode;
+  s.relayEnabled = mode === "relay";
+  write(s);
+  return mode;
+}
+var TOOLS = /* @__PURE__ */ new Set(["frp", "cloudflared", "natapp", "custom"]);
+function tunnelConfig() {
+  const t = read().tunnel;
+  if (!t || typeof t !== "object") return { tool: "frp", binPath: "", config: {} };
+  return {
+    tool: TOOLS.has(t.tool) ? t.tool : "frp",
+    binPath: typeof t.binPath === "string" ? t.binPath : "",
+    config: t.config && typeof t.config === "object" ? t.config : {}
+  };
+}
+function setTunnelConfig({ tool, binPath, config } = {}) {
+  if (tool !== void 0 && !TOOLS.has(tool)) throw new Error(`\u672A\u77E5\u96A7\u9053\u5DE5\u5177 | unknown tunnel tool: ${tool}`);
+  const cur = tunnelConfig();
+  const s = read();
+  const next = {
+    tool: tool ?? cur.tool,
+    binPath: binPath !== void 0 ? String(binPath ?? "").trim() : cur.binPath,
+    config: { ...cur.config, ...config && typeof config === "object" ? config : {} }
+  };
+  for (const [k, v] of Object.entries(next.config)) if (v === null) delete next.config[k];
+  s.tunnel = next;
+  write(s);
+  return next;
+}
+function tunnelInletPort() {
+  const v = Number(read().tunnelInletPort);
+  return Number.isInteger(v) && v >= 1 && v <= 65535 ? v : 0;
+}
+function setTunnelInletPort(value) {
+  const n = Number(value);
+  const s = read();
+  if (Number.isInteger(n) && n >= 1 && n <= 65535) s.tunnelInletPort = n;
+  else delete s.tunnelInletPort;
+  write(s);
+  return tunnelInletPort();
+}
 function resetSettings() {
   try {
     rmSync2(settingsPath(), { force: true });
@@ -9769,10 +10621,10 @@ var name = "dsh-relay";
 var inject = ["connection", "webServer"];
 var PIN_RE = /^[a-zA-Z0-9]{8}$/;
 function homeDir() {
-  return process.env.DSH_HOME ?? join3(homedir3(), ".dsh");
+  return process.env.DSH_HOME ?? join7(homedir4(), ".dsh");
 }
 function pinPath(kind) {
-  return join3(homeDir(), "dsh-relay", kind === "public" ? "token" : "token-lan");
+  return join7(homeDir(), "dsh-relay", kind === "public" ? "token" : "token-lan");
 }
 function readPin(kind) {
   try {
@@ -9784,8 +10636,8 @@ function readPin(kind) {
 }
 function writePin(kind, value) {
   try {
-    mkdirSync3(dirname3(pinPath(kind)), { recursive: true });
-    writeFileSync3(pinPath(kind), value, { mode: 384 });
+    mkdirSync4(dirname3(pinPath(kind)), { recursive: true });
+    writeFileSync4(pinPath(kind), value, { mode: 384 });
   } catch {
   }
   return value;
@@ -9830,6 +10682,16 @@ function apply(ctx, config = {}, internals = {}) {
       if (url !== void 0 && url !== "") setRelayUrl(url);
       if (token !== void 0 && token !== "") setRelayToken(token);
       setRelayEnabled(true);
+    },
+    // ---- 外接隧道 ----
+    getTunnelConfig: () => tunnelConfig(),
+    getTunnelInletPort: () => tunnelInletPort(),
+    saveTunnelInletPort: (p) => {
+      setTunnelInletPort(p);
+    },
+    getAccessMode: () => accessMode(),
+    setAccessMode: (mode) => {
+      setAccessMode(mode);
     },
     pluginVersion: (() => {
       try {
@@ -9907,6 +10769,37 @@ function apply(ctx, config = {}, internals = {}) {
       case "relay.enroll.cancel":
         service.enrollCancel();
         return await statusPayload();
+      // ---- 外接隧道 ----
+      case "tunnel.status":
+        return await statusPayload();
+      case "tunnel.detect":
+        return ok({ tools: service.tunnelDetect() });
+      case "tunnel.setConfig": {
+        try {
+          setTunnelConfig({
+            ...payload?.tool !== void 0 ? { tool: payload.tool } : {},
+            ...payload?.binPath !== void 0 ? { binPath: payload.binPath } : {},
+            ...payload?.config !== void 0 ? { config: payload.config } : {}
+          });
+        } catch (err) {
+          return fail2(err?.message ?? String(err));
+        }
+        return await statusPayload();
+      }
+      case "tunnel.start": {
+        if (payload?.confirm !== true) {
+          return fail2("\u5F00\u542F\u524D\u8BF7\u786E\u8BA4\u5B89\u5168\u63D0\u793A | please confirm the security notice first");
+        }
+        try {
+          await service.startTunnel();
+        } catch (err) {
+          return fail2(err?.message ?? String(err));
+        }
+        return await statusPayload();
+      }
+      case "tunnel.stop":
+        service.stopTunnel();
+        return await statusPayload();
       case "lan.setEnabled":
         setLanEnabled(payload?.on === true);
         return await statusPayload();
@@ -9933,6 +10826,7 @@ function apply(ctx, config = {}, internals = {}) {
       case "relay.reset": {
         if (payload?.confirm !== true) return fail2("\u6062\u590D\u51FA\u5382\u9700\u8981\u786E\u8BA4 | reset requires confirmation");
         service.stopRelay();
+        service.stopTunnel();
         resetSettings();
         const pins = resetPins();
         return ok({ ...await service.status(), accessToken: pins.public, lanToken: pins.lan });
@@ -9949,8 +10843,8 @@ function apply(ctx, config = {}, internals = {}) {
   }
   const disposeRpc = installRpc(ctx, { channel: "/dsh-relay", handler, log: logger });
   void service.startProxy().then((p) => {
-    logger.info("dsh-relay: proxy ready on :%d | \u672C\u5730\u4EE3\u7406\u5DF2\u5C31\u7EEA", p.port);
-    return service.restoreRelayIfNeeded();
+    logger.info("dsh-relay: proxy ready on :%d (tunnel inlet :%s) | \u672C\u5730\u4EE3\u7406\u5DF2\u5C31\u7EEA", p.port, p.tunnelPort ?? "-");
+    return service.restoreIfNeeded();
   }).catch((err) => {
     logger.error("dsh-relay: proxy start failed | \u4EE3\u7406\u542F\u52A8\u5931\u8D25: %s", err?.message ?? err);
   });
