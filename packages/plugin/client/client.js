@@ -45,13 +45,25 @@ var RELAY_ENDPOINTS = Object.freeze({
   pinSetCustom: "pin.setCustom",
   relayReset: "relay.reset",
   relayEnroll: "relay.enroll",
-  relayEnrollCancel: "relay.enroll.cancel"
+  relayEnrollCancel: "relay.enroll.cancel",
+  tunnelStatus: "tunnel.status",
+  tunnelDetect: "tunnel.detect",
+  tunnelSetConfig: "tunnel.setConfig",
+  tunnelStart: "tunnel.start",
+  tunnelStop: "tunnel.stop"
 });
+var MODES = ["relay", "tunnel", "lan"];
+var TUNNEL_TOOLS = ["frp", "cloudflared", "natapp", "custom"];
+var TUNNEL_PHASES = ["idle", "starting", "running", "backoff", "error"];
 function redactStatus(s) {
+  const ts = s?.tunnelState && typeof s.tunnelState === "object" ? s.tunnelState : {};
+  const tcfg = s?.tunnelConfig && typeof s.tunnelConfig === "object" ? s.tunnelConfig : {};
   return {
     proxyRunning: s?.proxyRunning === true,
     proxyPort: s?.proxyPort ?? null,
     dshPort: s?.dshPort ?? null,
+    // 接入方式；老 host 无 mode 字段时按运行中的通道推断
+    mode: MODES.includes(s?.mode) ? s.mode : s?.relayRunning === true ? "relay" : "lan",
     lanUrl: s?.lanUrl ?? null,
     lanQr: s?.lanQr ?? null,
     lanCandidates: Array.isArray(s?.lanCandidates) ? s.lanCandidates : [],
@@ -63,6 +75,26 @@ function redactStatus(s) {
     relayQr: s?.relayQr ?? null,
     relayState: s?.relayState ?? { phase: "idle" },
     relayConfig: s?.relayConfig ?? { url: "", tokenSet: false },
+    // ---- 外接隧道 ----
+    tunnelInletPort: Number(s?.tunnelInletPort) > 0 ? Number(s.tunnelInletPort) : null,
+    tunnelRunning: s?.tunnelRunning === true,
+    tunnelUrl: s?.tunnelUrl ?? null,
+    tunnelQr: s?.tunnelQr ?? null,
+    tunnelState: {
+      phase: TUNNEL_PHASES.includes(ts.phase) ? ts.phase : "idle",
+      tool: typeof ts.tool === "string" ? ts.tool : "",
+      detail: typeof ts.detail === "string" ? ts.detail : "",
+      publicUrl: typeof ts.publicUrl === "string" ? ts.publicUrl : "",
+      attempts: Number.isFinite(ts.attempts) ? ts.attempts : 0,
+      nextRetryAt: Number.isFinite(ts.nextRetryAt) ? ts.nextRetryAt : null,
+      pid: ts.pid ?? null,
+      logs: Array.isArray(ts.logs) ? ts.logs : []
+    },
+    tunnelConfig: {
+      tool: TUNNEL_TOOLS.includes(tcfg.tool) ? tcfg.tool : "frp",
+      binPath: typeof tcfg.binPath === "string" ? tcfg.binPath : "",
+      config: tcfg.config && typeof tcfg.config === "object" ? tcfg.config : {}
+    },
     accessToken: s?.accessToken ?? null,
     lanToken: s?.lanToken ?? null,
     publicPinCustom: s?.publicPinCustom === true,
@@ -77,7 +109,7 @@ var inject = ["connection", "slots", "locale"];
 var zh = {
   localeTag: "zh",
   appTitle: "DSH Relay",
-  appSub: "\u901A\u8FC7\u4F60\u81EA\u5DF1\u7684\u4E2D\u7EE7\u670D\u52A1\u7AEF\uFF0C\u4ECE\u4EFB\u4F55\u7F51\u7EDC\u8BBF\u95EE\u8FD9\u53F0\u7535\u8111\u4E0A\u7684 DSH",
+  appSub: "\u4ECE\u4EFB\u4F55\u7F51\u7EDC\u8BBF\u95EE\u8FD9\u53F0\u7535\u8111\u4E0A\u7684 DSH\uFF1A\u81EA\u5EFA\u670D\u52A1\u7AEF\uFF0C\u6216\u590D\u7528\u4F60\u5DF2\u6709\u7684\u96A7\u9053",
   stReady: "\u5DF2\u8FDE\u63A5\u670D\u52A1\u7AEF \xB7 \u5916\u7F51\u53EF\u8BBF\u95EE",
   stConnecting: "\u6B63\u5728\u8FDE\u63A5\u670D\u52A1\u7AEF\u2026",
   stReconnecting: "\u8FDE\u63A5\u4E2D\u65AD\uFF0C\u81EA\u52A8\u91CD\u8FDE\u4E2D",
@@ -86,8 +118,54 @@ var zh = {
   openRelay: "\u5F00\u542F\u5916\u7F51\u8BBF\u95EE",
   stopRelay: "\u505C\u6B62",
   opening: "\u8FDE\u63A5\u4E2D\u2026",
-  secWan: "\u5916\u7F51\u8BBF\u95EE\uFF08\u7ECF\u4E2D\u7EE7\u670D\u52A1\u7AEF\uFF09",
+  secAccess: "\u63A5\u5165\u65B9\u5F0F",
   secLan: "\u5C40\u57DF\u7F51\u76F4\u8FDE",
+  modeRelay: "\u81EA\u5EFA\u670D\u52A1\u7AEF",
+  modeRelayDesc: "\u81EA\u5DF1\u7684\u4E2D\u7EE7\u670D\u52A1\u7AEF\uFF1A\u591A\u53F0\u7535\u8111\u7EDF\u4E00\u7BA1\u7406\u3001\u51C6\u5165\u5BA1\u6279\u3001\u5BC6\u94A5\u8F6E\u6362",
+  modeTunnel: "\u5916\u63A5\u96A7\u9053",
+  modeTunnelDesc: "\u590D\u7528\u5DF2\u6709\u7684 frp \u7B49\u96A7\u9053\u5DE5\u5177\uFF0C\u65E0\u9700\u90E8\u7F72\u670D\u52A1\u7AEF",
+  modeActive: "\u4F7F\u7528\u4E2D",
+  lanSummaryOff: "\u5916\u7F51\u8BBF\u95EE\u672A\u5F00\u542F",
+  lanSummaryRelay: "\u5916\u7F51\u7ECF\u4E2D\u7EE7\u670D\u52A1\u7AEF\u5F00\u653E",
+  lanSummaryTunnel: "\u5916\u7F51\u7ECF\u5916\u63A5\u96A7\u9053\u5F00\u653E",
+  stopAllWan: "\u505C\u6B62\u5916\u7F51\u8BBF\u95EE",
+  tunnelTool: "\u96A7\u9053\u5DE5\u5177",
+  tunnelSave: "\u4FDD\u5B58\u914D\u7F6E",
+  tunnelStart: "\u542F\u52A8\u96A7\u9053",
+  tunnelDownload: "\u4E0B\u8F7D",
+  toolMissing: "\u672A\u627E\u5230",
+  tunnelRunningHint: "\u96A7\u9053\u8FD0\u884C\u4E2D\uFF0C\u4FEE\u6539\u914D\u7F6E\u8BF7\u5148\u505C\u6B62",
+  tunnelStateRunning: "\u96A7\u9053\u8FD0\u884C\u4E2D",
+  tunnelStateStarting: "\u6B63\u5728\u542F\u52A8\u96A7\u9053\u2026",
+  tunnelStateBackoff: "\u96A7\u9053\u8FDB\u7A0B\u5F02\u5E38\u9000\u51FA\uFF0C\u81EA\u52A8\u91CD\u542F\u4E2D",
+  tunnelStateError: "\u96A7\u9053\u9519\u8BEF",
+  tunnelStateIdle: "\u96A7\u9053\u672A\u542F\u52A8",
+  fProxyType: "\u66B4\u9732\u5F62\u6001",
+  fTcp: "TCP \u7AEF\u53E3\u6620\u5C04",
+  fHttp: "HTTP \u57DF\u540D",
+  fHttps: "HTTPS \u57DF\u540D",
+  fRaw: "\u9AD8\u7EA7\uFF1A\u5B8C\u6574 frpc.toml",
+  fServerAddr: "frps \u670D\u52A1\u5668\u5730\u5740",
+  fServerPort: "frps \u7AEF\u53E3",
+  fToken: "\u9274\u6743 token",
+  fRemotePort: "\u8FDC\u7A0B\u7AEF\u53E3\uFF08\u53EF\u7A7A\uFF09",
+  fRemotePortPh: "\u7559\u7A7A = \u670D\u52A1\u7AEF\u968F\u673A\u5206\u914D",
+  fCustomDomain: "\u81EA\u5B9A\u4E49\u57DF\u540D",
+  fSubdomain: "\u5B50\u57DF\u540D\uFF08frps \u7684 subDomainHost \u4E0B\uFF09",
+  fRawToml: "frpc.toml \u5185\u5BB9\uFF08localPort \u6307\u5411\u6CE8\u5165\u7AEF\u53E3\uFF09",
+  fBinPath: "\u4E8C\u8FDB\u5236\u8DEF\u5F84\uFF08\u53EF\u7A7A = \u81EA\u52A8\u63A2\u6D4B\uFF09",
+  fTokenCloud: "Tunnel Token\uFF08\u53EF\u7A7A\uFF09",
+  fTokenCloudPh: "\u7559\u7A7A = \u514D\u8D26\u53F7\u4E34\u65F6\u57DF\u540D",
+  fAuthtoken: "\u96A7\u9053 authtoken",
+  fCommand: "\u542F\u52A8\u547D\u4EE4",
+  fCommandPh: "bore local {{port}} --to bore.pub",
+  fConfigTemplate: "\u914D\u7F6E\u6587\u4EF6\u6A21\u677F\uFF08\u53EF\u9009\uFF0C\u652F\u6301 {{port}} / {{configFile}} \u5360\u4F4D\u7B26\uFF09",
+  fConfigFileName: "\u914D\u7F6E\u6587\u4EF6\u540D\uFF08\u53EF\u9009\uFF09",
+  fPublicUrl: "\u516C\u7F51\u5730\u5740\uFF08\u53EF\u9009\uFF0C\u7528\u4E8E\u4E8C\u7EF4\u7801\uFF09",
+  warnPlainTcp: "\u624B\u673A\u5230 frps \u4E4B\u95F4\u4E3A\u660E\u6587 HTTP\uFF0C\u8BBF\u95EE\u5BC6\u7801\u4F1A\u7ECF\u8FC7\u8BE5\u94FE\u8DEF\uFF1Bfrps \u6709\u57DF\u540D\u548C\u8BC1\u4E66\u65F6\u5EFA\u8BAE\u6539\u7528 HTTPS \u5F62\u6001",
+  warnPlainCustom: "\u516C\u7F51\u5730\u5740\u4E3A\u660E\u6587 HTTP\uFF0C\u8BBF\u95EE\u5BC6\u7801\u4F1A\u7ECF\u8FC7\u8BE5\u94FE\u8DEF\uFF1B\u5EFA\u8BAE\u4F7F\u7528 HTTPS \u5165\u53E3",
+  advTunnel: "\u9AD8\u7EA7\uFF1A\u7A33\u5B9A\u6CE8\u5165\u7AEF\u53E3",
+  advTunnelDesc: "\u672C\u673A\u56DE\u73AF\u7AEF\u53E3\u3002\u4EFB\u4F55\u96A7\u9053\u5DE5\u5177\u628A\u6D41\u91CF\u8F6C\u53D1\u5230\u8FD9\u91CC\u5373\u53EF\u63A5\u5165\uFF0C\u65E0\u9700\u63D2\u4EF6\u6258\u7BA1",
   cfgTitle: "\u8FDE\u63A5\u5230\u4F60\u7684\u670D\u52A1\u7AEF",
   cfgStep1: "\u2460 \u670D\u52A1\u7AEF\u5730\u5740",
   cfgStep2: "\u2461 \u670D\u52A1\u7AEF\u5BC6\u94A5\u4E32\uFF08\u5728\u670D\u52A1\u7AEF\u7BA1\u7406\u53F0\u751F\u6210/\u6279\u51C6\u63A5\u5165\u540E\u81EA\u52A8\u83B7\u5F97\uFF09",
@@ -134,7 +212,7 @@ var zh = {
 var en = {
   localeTag: "en",
   appTitle: "DSH Relay",
-  appSub: "Reach the DSH on this computer from anywhere via your own relay server",
+  appSub: "Reach the DSH on this computer from anywhere \u2014 your own relay server, or a tunnel you already have",
   stReady: "Connected \xB7 internet access active",
   stConnecting: "Connecting to relay server\u2026",
   stReconnecting: "Connection lost, reconnecting",
@@ -143,8 +221,54 @@ var en = {
   openRelay: "Enable internet access",
   stopRelay: "Stop",
   opening: "Connecting\u2026",
-  secWan: "Internet (via relay server)",
+  secAccess: "Access mode",
   secLan: "LAN direct",
+  modeRelay: "Relay server",
+  modeRelayDesc: "Your own relay: multi-device management, approval join, key rotation",
+  modeTunnel: "Bring your own tunnel",
+  modeTunnelDesc: "Reuse a tunnel you already have (frp, \u2026) \u2014 no server to deploy",
+  modeActive: "Active",
+  lanSummaryOff: "Internet access is off",
+  lanSummaryRelay: "Internet access via relay server",
+  lanSummaryTunnel: "Internet access via external tunnel",
+  stopAllWan: "Stop internet access",
+  tunnelTool: "Tunnel tool",
+  tunnelSave: "Save settings",
+  tunnelStart: "Start tunnel",
+  tunnelDownload: "Download",
+  toolMissing: "not found",
+  tunnelRunningHint: "Tunnel is running \u2014 stop it before changing settings",
+  tunnelStateRunning: "Tunnel running",
+  tunnelStateStarting: "Starting tunnel\u2026",
+  tunnelStateBackoff: "Tunnel exited, restarting",
+  tunnelStateError: "Tunnel error",
+  tunnelStateIdle: "Tunnel not running",
+  fProxyType: "Exposure mode",
+  fTcp: "TCP port mapping",
+  fHttp: "HTTP vhost",
+  fHttps: "HTTPS vhost",
+  fRaw: "Advanced: full frpc.toml",
+  fServerAddr: "frps server address",
+  fServerPort: "frps port",
+  fToken: "Auth token",
+  fRemotePort: "Remote port (optional)",
+  fRemotePortPh: "empty = assigned by the server",
+  fCustomDomain: "Custom domain",
+  fSubdomain: "Subdomain (under frps subDomainHost)",
+  fRawToml: "frpc.toml content (localPort points at the inlet)",
+  fBinPath: "Binary path (empty = auto-detect)",
+  fTokenCloud: "Tunnel token (optional)",
+  fTokenCloudPh: "empty = account-free temporary URL",
+  fAuthtoken: "Tunnel authtoken",
+  fCommand: "Launch command",
+  fCommandPh: "bore local {{port}} --to bore.pub",
+  fConfigTemplate: "Config file template (optional; {{port}} / {{configFile}} placeholders)",
+  fConfigFileName: "Config file name (optional)",
+  fPublicUrl: "Public URL (optional, for the QR code)",
+  warnPlainTcp: "Traffic between your phone and the frp server is plain HTTP \u2014 the access PIN travels over it. Prefer the HTTPS mode when your frps has a domain and certificate.",
+  warnPlainCustom: "The public URL is plain HTTP \u2014 the access PIN travels over it. Prefer an HTTPS entry.",
+  advTunnel: "Advanced: stable inlet port",
+  advTunnelDesc: "Loopback port on this computer. Any tunnel tool can simply forward traffic here \u2014 no supervision needed",
   cfgTitle: "Connect to your relay server",
   cfgStep1: "\u2460 Server address",
   cfgStep2: "\u2461 Server secret (from admin console or auto-issued on approval)",
@@ -206,9 +330,13 @@ var S = {
   qr: { width: 132, height: 132, borderRadius: 8, display: "block" },
   grid2: { display: "grid", gridTemplateColumns: "132px 1fr", gap: 14, alignItems: "start" },
   warn: { color: "var(--dsw-alias-state-warn-primary,#b45309)", fontSize: 12 },
-  err: { color: "var(--dsw-alias-state-error-primary,#dc2626)", fontSize: 12 }
+  err: { color: "var(--dsw-alias-state-error-primary,#dc2626)", fontSize: 12 },
+  ok: { color: "var(--dsw-alias-state-success-primary,#16a34a)", fontSize: 12 },
+  link: { color: "var(--dsw-alias-brand-primary,#4f6ef7)", textDecoration: "underline" }
 };
 var STATE_COLORS = { ready: "#16a34a", connecting: "#d97706", reconnecting: "#d97706", error: "#dc2626", idle: "#6b7280" };
+var TUNNEL_STATE_COLORS = { running: "#16a34a", starting: "#d97706", backoff: "#d97706", error: "#dc2626", idle: "#6b7280" };
+var TOOL_ORDER = ["frp", "cloudflared", "natapp", "custom"];
 function Switch(on, onClick) {
   return (0, import_react.createElement)(
     "button",
@@ -222,6 +350,7 @@ function RelaySettingsTab({ rpcCall, t }) {
     if (vars) for (const [k, v] of Object.entries(vars)) s = String(s).split(`{${k}}`).join(String(v));
     return s;
   };
+  const localeEn = t("localeTag") === "en";
   const [st, setSt] = (0, import_react.useState)(null);
   const [busy, setBusy] = (0, import_react.useState)(false);
   const [cfgEdit, setCfgEdit] = (0, import_react.useState)(null);
@@ -245,6 +374,11 @@ function RelaySettingsTab({ rpcCall, t }) {
       setSt(redactStatus(await call(RELAY_ENDPOINTS.status, {})));
     } catch {
     }
+    try {
+      const d = await call(RELAY_ENDPOINTS.tunnelDetect, {});
+      setTools(Array.isArray(d?.tools) ? d.tools : []);
+    } catch {
+    }
   };
   (0, import_react.useEffect)(() => {
     poll();
@@ -254,7 +388,7 @@ function RelaySettingsTab({ rpcCall, t }) {
   const errText = (m) => {
     const s = String(m ?? "");
     const i = s.indexOf(" | ");
-    return i < 0 ? s : (t("localeTag") === "en" ? s.slice(i + 3) : s.slice(0, i)).trim();
+    return i < 0 ? s : (localeEn ? s.slice(i + 3) : s.slice(0, i)).trim();
   };
   const apply2 = async (fn) => {
     setBusy(true);
@@ -267,6 +401,17 @@ function RelaySettingsTab({ rpcCall, t }) {
       setBusy(false);
     }
   };
+  const applyTunnel = async (fn) => {
+    setBusy(true);
+    setTunnelErr(null);
+    try {
+      setSt(redactStatus(await fn()));
+    } catch (e) {
+      setTunnelErr(e.message);
+    } finally {
+      setBusy(false);
+    }
+  };
   const copy = (text) => {
     try {
       navigator.clipboard.writeText(text);
@@ -274,11 +419,29 @@ function RelaySettingsTab({ rpcCall, t }) {
     } catch {
     }
   };
-  const phase = st?.relayState?.phase ?? "idle";
-  const cfg = st?.relayConfig ?? { url: "", tokenSet: false };
+  const mode = st?.mode ?? "lan";
+  const [view, setView] = (0, import_react.useState)(null);
+  const effView = view ?? (mode === "tunnel" ? "tunnel" : "relay");
   const rs = st?.relayState ?? {};
-  const bannerText = phase === "ready" ? t("stReady") : phase === "reconnecting" ? t("stReconnecting") : phase === "connecting" ? t("stConnecting") : phase === "error" ? t("stError") : t("stIdle");
-  const bannerColor = STATE_COLORS[phase] ?? STATE_COLORS.idle;
+  const phase = rs.phase ?? "idle";
+  const cfg = st?.relayConfig ?? { url: "", tokenSet: false };
+  const ts = st?.tunnelState ?? { phase: "idle" };
+  const wanOn = st?.relayRunning === true;
+  const tunnelOn = st?.tunnelRunning === true;
+  const wanConfigured = Boolean(cfg.url);
+  const enroll = st?.enroll ?? { phase: "idle", detail: "" };
+  let bannerText;
+  let bannerColor;
+  if (mode === "tunnel") {
+    bannerText = (ts.phase === "running" ? t("tunnelStateRunning") : ts.phase === "starting" ? t("tunnelStateStarting") : ts.phase === "backoff" ? t("tunnelStateBackoff") : ts.phase === "error" ? t("tunnelStateError") : t("tunnelStateIdle")) + (ts.tool ? ` \xB7 ${ts.tool}` : "");
+    bannerColor = TUNNEL_STATE_COLORS[ts.phase] ?? TUNNEL_STATE_COLORS.idle;
+  } else if (mode === "relay") {
+    bannerText = phase === "ready" ? t("stReady") : phase === "reconnecting" ? t("stReconnecting") : phase === "connecting" ? t("stConnecting") : phase === "error" ? t("stError") : t("stIdle");
+    bannerColor = STATE_COLORS[phase] ?? STATE_COLORS.idle;
+  } else {
+    bannerText = t("stIdle");
+    bannerColor = STATE_COLORS.idle;
+  }
   const errOf = (m) => (0, import_react.createElement)("div", { style: S.err }, t("errPrefix") + errText(m));
   const savePin = async (which) => {
     try {
@@ -348,9 +511,6 @@ function RelaySettingsTab({ rpcCall, t }) {
       setCfgEdit((c) => ({ ...c, err: e.message }));
     }
   };
-  const wanOn = st?.relayRunning === true;
-  const wanConfigured = Boolean(cfg.url);
-  const enroll = st?.enroll ?? { phase: "idle", detail: "" };
   const [enrollForm, setEnrollForm] = (0, import_react.useState)({ url: "", code: "" });
   const [manualMode, setManualMode] = (0, import_react.useState)(false);
   const doEnroll = () => {
@@ -358,7 +518,7 @@ function RelaySettingsTab({ rpcCall, t }) {
     void apply2(() => call(RELAY_ENDPOINTS.relayEnroll, { url: enrollForm.url, code: enrollForm.code }));
   };
   const enrollActive = ["submitting", "pending", "approved"].includes(enroll.phase);
-  const enrollStatusLine = enroll.phase === "idle" || !enroll.detail ? null : enroll.phase === "done" || enroll.phase === "approved" ? (0, import_react.createElement)("div", { style: { color: "var(--dsw-alias-state-success-primary,#16a34a)", fontSize: 12, marginTop: 8 } }, "\u2713 " + errText(enroll.detail)) : (0, import_react.createElement)(
+  const enrollStatusLine = enroll.phase === "idle" || !enroll.detail ? null : enroll.phase === "done" || enroll.phase === "approved" ? (0, import_react.createElement)("div", { style: { ...S.ok, marginTop: 8 } }, "\u2713 " + errText(enroll.detail)) : (0, import_react.createElement)(
     "div",
     { style: { marginTop: 8 } },
     (0, import_react.createElement)("div", { style: enrollActive ? S.warn : S.err }, errText(enroll.detail)),
@@ -490,6 +650,276 @@ function RelaySettingsTab({ rpcCall, t }) {
     !wanOn ? wanStart : null,
     wanOn ? wanQr : null
   );
+  const [tools, setTools] = (0, import_react.useState)([]);
+  const [tunnelErr, setTunnelErr] = (0, import_react.useState)(null);
+  const [tform, setTform] = (0, import_react.useState)(null);
+  const tformInit = (0, import_react.useRef)(false);
+  (0, import_react.useEffect)(() => {
+    if (!st || tformInit.current) return;
+    tformInit.current = true;
+    const tc = st.tunnelConfig ?? { tool: "frp", binPath: "", config: {} };
+    setTform({ tool: tc.tool, binPath: tc.binPath ?? "", cfg: { ...tc.config ?? {} } });
+  }, [st]);
+  const toolList = tools.length ? TOOL_ORDER.map((id) => tools.find((x) => x.id === id)).filter(Boolean) : TOOL_ORDER.map((id) => ({ id }));
+  const curTool = toolList.find((x) => x.id === tform?.tool) ?? null;
+  const setTcfg = (key, value) => setTform((c) => ({ ...c, cfg: { ...c.cfg, [key]: value } }));
+  const field = (label, key, opts = {}) => (0, import_react.createElement)(
+    "div",
+    { style: { marginTop: 8 } },
+    (0, import_react.createElement)("div", { style: S.field }, label),
+    (0, import_react.createElement)("input", {
+      style: S.input,
+      type: opts.type ?? "text",
+      placeholder: opts.ph ?? "",
+      value: tform?.cfg?.[key] ?? "",
+      onChange: (e) => setTcfg(key, e.target.value)
+    })
+  );
+  const fieldArea = (label, key, ph) => (0, import_react.createElement)(
+    "div",
+    { style: { marginTop: 8 } },
+    (0, import_react.createElement)("div", { style: S.field }, label),
+    (0, import_react.createElement)("textarea", {
+      style: { ...S.input, minHeight: 90, fontFamily: "ui-monospace,Menlo,monospace", resize: "vertical" },
+      placeholder: ph ?? "",
+      value: tform?.cfg?.[key] ?? "",
+      onChange: (e) => setTcfg(key, e.target.value)
+    })
+  );
+  const binPathField = (0, import_react.createElement)(
+    "div",
+    { style: { marginTop: 8 } },
+    (0, import_react.createElement)("div", { style: S.field }, t("fBinPath")),
+    (0, import_react.createElement)("input", {
+      style: { ...S.input, fontFamily: "ui-monospace,Menlo,monospace" },
+      placeholder: "/usr/local/bin/frpc",
+      value: tform?.binPath ?? "",
+      onChange: (e) => setTform((c) => ({ ...c, binPath: e.target.value.trim() }))
+    })
+  );
+  const [frpSel, setFrpSel] = (0, import_react.useState)(null);
+  const frpMode = frpSel ?? (String(tform?.cfg?.rawToml ?? "").trim() ? "raw" : ["http", "https"].includes(tform?.cfg?.proxyType) ? tform.cfg.proxyType : "tcp");
+  const formPlainWarn = tform?.tool === "frp" && frpMode === "tcp" || tform?.tool === "custom" && String(tform?.cfg?.publicUrl ?? "").trim().startsWith("http://");
+  const runTool = st?.tunnelConfig?.tool ?? ts.tool;
+  const runCf = st?.tunnelConfig?.config ?? {};
+  const runPlainWarn = runTool === "frp" && !String(runCf.rawToml ?? "").trim() && ["tcp", "", void 0].includes(runCf.proxyType) || runTool === "custom" && String(runCf.publicUrl ?? "").trim().startsWith("http://");
+  const toolChips = (0, import_react.createElement)(
+    "div",
+    null,
+    (0, import_react.createElement)("div", { style: { ...S.field, fontWeight: 600, marginTop: 4 } }, t("tunnelTool")),
+    (0, import_react.createElement)(
+      "div",
+      { style: { display: "flex", gap: 6, flexWrap: "wrap", marginTop: 6 } },
+      toolList.map((td) => (0, import_react.createElement)(
+        "button",
+        {
+          key: td.id,
+          title: td.reason ?? "",
+          onClick: () => setTform((c) => ({ ...c ?? { binPath: "", cfg: {} }, tool: td.id })),
+          style: {
+            ...S.mini,
+            height: 28,
+            padding: "0 10px",
+            fontSize: 12,
+            cursor: "pointer",
+            ...tform?.tool === td.id ? { borderColor: "var(--dsw-alias-brand-primary,#4f6ef7)", color: "var(--dsw-alias-brand-primary,#4f6ef7)", fontWeight: 700 } : {}
+          }
+        },
+        td.label ?? td.id,
+        " ",
+        td.id === "custom" ? null : (0, import_react.createElement)("span", { style: { color: td.available ? "var(--dsw-alias-state-success-primary,#16a34a)" : "var(--dsw-alias-label-tertiary,#8b93a1)" } }, td.available ? "\u25CF" : "\u25CB")
+      ))
+    )
+  );
+  const toolDocs = curTool?.docs ? (0, import_react.createElement)("div", { style: { ...S.muted, marginTop: 8 } }, localeEn ? curTool.docs.en : curTool.docs.zh) : null;
+  const toolDownload = curTool && !curTool.available && curTool.docs ? (0, import_react.createElement)(
+    "div",
+    { style: { ...S.muted, marginTop: 6 } },
+    `\u25CB ${t("toolMissing")} \xB7 ${localeEn ? curTool.docs.download.en : curTool.docs.download.zh}`,
+    curTool.docs.downloadUrl ? (0, import_react.createElement)("a", { href: curTool.docs.downloadUrl, target: "_blank", rel: "noreferrer", style: { ...S.link, marginLeft: 6 } }, t("tunnelDownload")) : null
+  ) : null;
+  const frpForm = (0, import_react.createElement)(
+    "div",
+    null,
+    (0, import_react.createElement)(
+      "div",
+      { style: { marginTop: 8 } },
+      (0, import_react.createElement)("div", { style: S.field }, t("fProxyType")),
+      (0, import_react.createElement)(
+        "select",
+        {
+          style: { ...S.input, width: "auto", marginTop: 4 },
+          value: frpMode,
+          onChange: (e) => {
+            const v = e.target.value;
+            setFrpSel(v);
+            if (v !== "raw") setTform((c) => ({ ...c, cfg: { ...c.cfg, proxyType: v, rawToml: null } }));
+          }
+        },
+        (0, import_react.createElement)("option", { value: "tcp" }, t("fTcp")),
+        (0, import_react.createElement)("option", { value: "http" }, t("fHttp")),
+        (0, import_react.createElement)("option", { value: "https" }, t("fHttps")),
+        (0, import_react.createElement)("option", { value: "raw" }, t("fRaw"))
+      )
+    ),
+    frpMode === "raw" ? fieldArea(t("fRawToml"), "rawToml") : (0, import_react.createElement)(
+      "div",
+      null,
+      field(t("fServerAddr"), "serverAddr", { ph: "frps.example.com \u6216 1.2.3.4" }),
+      field(t("fServerPort"), "serverPort", { ph: "7000" }),
+      field(t("fToken"), "token", { type: "password", ph: t("tokenPlaceholder") }),
+      frpMode === "tcp" ? field(t("fRemotePort"), "remotePort", { ph: t("fRemotePortPh") }) : (0, import_react.createElement)(
+        "div",
+        null,
+        field(t("fCustomDomain"), "customDomain", { ph: "dsh.example.com" }),
+        field(t("fSubdomain"), "subdomain", { ph: "dsh" })
+      )
+    )
+  );
+  const tunnelForms = {
+    frp: frpForm,
+    cloudflared: (0, import_react.createElement)("div", null, field(t("fTokenCloud"), "token", { type: "password", ph: t("fTokenCloudPh") })),
+    natapp: (0, import_react.createElement)("div", null, field(t("fAuthtoken"), "authtoken", { type: "password", ph: "xxxxxxxx" })),
+    custom: (0, import_react.createElement)(
+      "div",
+      null,
+      field(t("fCommand"), "command", { ph: t("fCommandPh") }),
+      fieldArea(t("fConfigTemplate"), "configTemplate", "local_port = {{port}}"),
+      field(t("fConfigFileName"), "configFileName", { ph: "client.toml" }),
+      field(t("fPublicUrl"), "publicUrl", { ph: "https://\u2026" })
+    )
+  };
+  const tunnelSavePayload = () => {
+    const out = {};
+    for (const [k, v] of Object.entries(tform?.cfg ?? {})) out[k] = v === "" || v == null ? null : v;
+    return { tool: tform.tool, binPath: String(tform?.binPath ?? "").trim(), config: out };
+  };
+  const saveTunnelCfg = async () => call(RELAY_ENDPOINTS.tunnelSetConfig, tunnelSavePayload());
+  const startTunnelFlow = async () => {
+    await saveTunnelCfg();
+    return call(RELAY_ENDPOINTS.tunnelStart, { confirm: true });
+  };
+  const [tAdvOpen, setTAdvOpen] = (0, import_react.useState)(false);
+  const inletText = `127.0.0.1:${st?.tunnelInletPort ?? ""}`;
+  const tunnelAdv = (0, import_react.createElement)(
+    "div",
+    { style: { marginTop: 12, paddingTop: 10, borderTop: "1px solid var(--dsw-alias-border-l2,#e5e7eb)" } },
+    (0, import_react.createElement)("button", { style: S.mini, onClick: () => setTAdvOpen((v) => !v) }, (tAdvOpen ? "\u25BE " : "\u25B8 ") + t("advTunnel")),
+    tAdvOpen ? (0, import_react.createElement)(
+      "div",
+      { style: { marginTop: 8 } },
+      (0, import_react.createElement)(
+        "div",
+        { style: { display: "flex", alignItems: "center", gap: 8 } },
+        (0, import_react.createElement)("span", { style: { ...S.url, fontSize: 13 } }, st?.tunnelInletPort ? inletText : "\u2014"),
+        st?.tunnelInletPort ? (0, import_react.createElement)("button", { style: S.mini, onClick: () => copy(inletText) }, t("copy")) : null
+      ),
+      (0, import_react.createElement)("div", { style: { ...S.muted, marginTop: 6 } }, t("advTunnelDesc"))
+    ) : null
+  );
+  const tunnelStatusLine = (0, import_react.createElement)(
+    "div",
+    { style: { display: "flex", alignItems: "center", gap: 8, marginTop: 12 } },
+    (0, import_react.createElement)("span", { style: { width: 8, height: 8, borderRadius: "50%", background: TUNNEL_STATE_COLORS[ts.phase] ?? TUNNEL_STATE_COLORS.idle, flexShrink: 0 } }),
+    (0, import_react.createElement)(
+      "span",
+      { style: { fontSize: 12, color: "var(--dsw-alias-label-secondary,#6b7280)" } },
+      (ts.phase === "running" ? t("tunnelStateRunning") : ts.phase === "starting" ? t("tunnelStateStarting") : ts.phase === "backoff" ? t("tunnelStateBackoff") : ts.phase === "error" ? t("tunnelStateError") : t("tunnelStateIdle")) + (ts.detail ? ` \xB7 ${errText(ts.detail)}` : "")
+    )
+  );
+  const tunnelRunning = tunnelOn || ["starting", "backoff"].includes(ts.phase);
+  const tunnelBlock = (0, import_react.createElement)(
+    "div",
+    { style: S.card },
+    // 状态区：URL + 二维码 + 状态行 + 停止（运行/启动中/退避/报错时展示）
+    ts.phase !== "idle" || tunnelOn ? (0, import_react.createElement)(
+      "div",
+      null,
+      st?.tunnelUrl ? (0, import_react.createElement)(
+        "div",
+        { style: { ...S.grid2, marginTop: 4 } },
+        (0, import_react.createElement)("img", { src: st.tunnelQr, alt: "QR", style: S.qr }),
+        (0, import_react.createElement)(
+          "div",
+          null,
+          maskableUrl(st.tunnelUrl),
+          (0, import_react.createElement)("div", { style: { ...S.muted, margin: "4px 0 10px" } }, t("qrHintWan")),
+          (0, import_react.createElement)("button", { style: S.mini, onClick: () => copy(st.tunnelUrl) }, t("copy")),
+          runPlainWarn ? (0, import_react.createElement)("div", { style: { ...S.warn, marginTop: 8 } }, "\u26A0 " + (runTool === "frp" ? t("warnPlainTcp") : t("warnPlainCustom"))) : null,
+          pinBlock("public", st.accessToken, st.publicPinCustom, t("pinDesc"))
+        )
+      ) : null,
+      tunnelStatusLine,
+      ts.phase === "backoff" && ts.attempts ? (0, import_react.createElement)("div", { style: { ...S.warn, marginTop: 6 } }, tf("retryInfo", { n: ts.attempts, s: ts.nextRetryAt ? Math.max(0, Math.ceil((ts.nextRetryAt - Date.now()) / 1e3)) : "\u2014" })) : null,
+      (0, import_react.createElement)(
+        "div",
+        { style: { display: "flex", gap: 8, marginTop: 10, alignItems: "center" } },
+        (0, import_react.createElement)("button", { style: { ...S.mini, ...S.danger }, disabled: busy, onClick: () => applyTunnel(() => call(RELAY_ENDPOINTS.tunnelStop, {})) }, t("stopRelay")),
+        tunnelRunning ? (0, import_react.createElement)("span", { style: S.muted }, t("tunnelRunningHint")) : null
+      ),
+      tunnelErr ? errOf(tunnelErr) : null
+    ) : null,
+    // 配置区：未运行（或报错待修）时展示
+    !tunnelRunning ? (0, import_react.createElement)(
+      "div",
+      { style: ts.phase !== "idle" || tunnelOn ? { marginTop: 12, paddingTop: 12, borderTop: "1px solid var(--dsw-alias-border-l2,#e5e7eb)" } : null },
+      tform ? (0, import_react.createElement)(
+        "div",
+        null,
+        toolChips,
+        toolDocs,
+        toolDownload,
+        tunnelForms[tform.tool] ?? null,
+        binPathField,
+        formPlainWarn ? (0, import_react.createElement)("div", { style: { ...S.warn, marginTop: 10 } }, "\u26A0 " + (tform.tool === "frp" ? t("warnPlainTcp") : t("warnPlainCustom"))) : null,
+        (0, import_react.createElement)(
+          "div",
+          { style: { display: "flex", gap: 8, marginTop: 12, alignItems: "center", flexWrap: "wrap" } },
+          (0, import_react.createElement)("button", { style: S.mini, disabled: busy, onClick: () => applyTunnel(saveTunnelCfg) }, t("tunnelSave")),
+          (0, import_react.createElement)("button", { style: S.primary, disabled: busy, onClick: () => applyTunnel(startTunnelFlow) }, busy ? t("opening") : t("tunnelStart")),
+          tunnelErr && !(ts.phase !== "idle") ? errOf(tunnelErr) : null
+        )
+      ) : null
+    ) : null,
+    tunnelAdv
+  );
+  const wanActiveMode = mode === "relay" && wanOn ? "relay" : mode === "tunnel" && tunnelOn ? "tunnel" : null;
+  const lanSummaryRow = (0, import_react.createElement)(
+    "div",
+    { style: { ...S.card, display: "flex", alignItems: "center", justifyContent: "space-between", gap: 8, marginTop: 8, padding: "9px 14px" } },
+    (0, import_react.createElement)(
+      "span",
+      { style: S.muted },
+      wanActiveMode === "relay" ? t("lanSummaryRelay") : wanActiveMode === "tunnel" ? t("lanSummaryTunnel") : t("lanSummaryOff")
+    ),
+    wanActiveMode ? (0, import_react.createElement)("button", {
+      style: { ...S.mini, ...S.danger },
+      disabled: busy,
+      onClick: () => apply2(async () => {
+        await call(RELAY_ENDPOINTS.relayStop, {});
+        return call(RELAY_ENDPOINTS.tunnelStop, {});
+      })
+    }, t("stopAllWan")) : null
+  );
+  const modeCard = (id, title, desc) => (0, import_react.createElement)(
+    "div",
+    {
+      role: "button",
+      tabIndex: 0,
+      onClick: () => setView(id),
+      onKeyDown: (e) => {
+        if (e.key === "Enter" || e.key === " ") setView(id);
+      },
+      style: { ...S.card, cursor: "pointer", ...mode === id ? { borderLeft: "3px solid var(--dsw-alias-brand-primary,#4f6ef7)", background: "var(--dsw-alias-bg-layer-2,rgba(79,110,247,.06))" } : {} }
+    },
+    (0, import_react.createElement)(
+      "div",
+      { style: { display: "flex", alignItems: "center", justifyContent: "space-between", gap: 6 } },
+      (0, import_react.createElement)("span", { style: { ...S.field, fontWeight: 700, fontSize: 13 } }, title),
+      mode === id ? (0, import_react.createElement)("span", { style: { fontSize: 11, fontWeight: 700, color: "var(--dsw-alias-brand-primary,#4f6ef7)", whiteSpace: "nowrap" } }, `\u25CF ${t("modeActive")}`) : null
+    ),
+    (0, import_react.createElement)("div", { style: { ...S.muted, marginTop: 4 } }, desc)
+  );
   const lanBlock = (0, import_react.createElement)(
     "div",
     { style: S.card },
@@ -549,6 +979,7 @@ function RelaySettingsTab({ rpcCall, t }) {
     ),
     (0, import_react.createElement)("div", { style: S.muted }, t("resetDesc"))
   );
+  const bannerStop = mode === "relay" && wanOn ? (0, import_react.createElement)("button", { style: { ...S.mini, borderColor: "rgba(255,255,255,.5)", color: "#fff", height: 28, fontSize: 12 }, onClick: () => apply2(() => call(RELAY_ENDPOINTS.relayStop, {})) }, t("stopRelay")) : mode === "tunnel" && (tunnelOn || ["starting", "backoff", "error"].includes(ts.phase)) ? (0, import_react.createElement)("button", { style: { ...S.mini, borderColor: "rgba(255,255,255,.5)", color: "#fff", height: 28, fontSize: 12 }, onClick: () => applyTunnel(() => call(RELAY_ENDPOINTS.tunnelStop, {})) }, t("stopRelay")) : null;
   return (0, import_react.createElement)(
     "div",
     { style: S.wrap },
@@ -562,16 +993,24 @@ function RelaySettingsTab({ rpcCall, t }) {
         (0, import_react.createElement)("div", { style: { fontWeight: 700, fontSize: 15 } }, t("appTitle")),
         (0, import_react.createElement)("div", { style: { fontSize: 12, opacity: 0.9 } }, bannerText)
       ),
-      wanOn ? (0, import_react.createElement)("button", { style: { ...S.mini, borderColor: "rgba(255,255,255,.5)", color: "#fff", height: 28, fontSize: 12 }, onClick: () => apply2(() => call(RELAY_ENDPOINTS.relayStop, {})) }, t("stopRelay")) : null
+      bannerStop
     ),
     (0, import_react.createElement)(
       "div",
       { style: S.body },
       (0, import_react.createElement)("div", { style: { ...S.muted, marginTop: -6, marginBottom: 4 } }, t("appSub")),
-      phase === "reconnecting" && rs.attempts ? (0, import_react.createElement)("div", { style: { ...S.warn, marginBottom: 6 } }, tf("retryInfo", { n: rs.attempts, s: rs.nextRetryAt ? Math.max(0, Math.ceil((rs.nextRetryAt - Date.now()) / 1e3)) : "\u2014" })) : null,
+      mode === "relay" && phase === "reconnecting" && rs.attempts ? (0, import_react.createElement)("div", { style: { ...S.warn, marginBottom: 6 } }, tf("retryInfo", { n: rs.attempts, s: rs.nextRetryAt ? Math.max(0, Math.ceil((rs.nextRetryAt - Date.now()) / 1e3)) : "\u2014" })) : null,
+      mode === "tunnel" && ts.phase === "backoff" && ts.attempts ? (0, import_react.createElement)("div", { style: { ...S.warn, marginBottom: 6 } }, tf("retryInfo", { n: ts.attempts, s: ts.nextRetryAt ? Math.max(0, Math.ceil((ts.nextRetryAt - Date.now()) / 1e3)) : "\u2014" })) : null,
       error ? (0, import_react.createElement)("div", { style: { ...S.err, marginBottom: 6 } }, t("errPrefix") + errText(error)) : null,
-      (0, import_react.createElement)("div", { style: S.sectionLabel }, t("secWan")),
-      wanBlock,
+      (0, import_react.createElement)("div", { style: S.sectionLabel }, t("secAccess")),
+      (0, import_react.createElement)(
+        "div",
+        { style: { display: "grid", gridTemplateColumns: "1fr 1fr", gap: 8 } },
+        modeCard("relay", t("modeRelay"), t("modeRelayDesc")),
+        modeCard("tunnel", t("modeTunnel"), t("modeTunnelDesc"))
+      ),
+      (0, import_react.createElement)("div", { style: { marginTop: 8 } }, lanSummaryRow),
+      (0, import_react.createElement)("div", { style: { marginTop: 8 } }, effView === "relay" ? wanBlock : tunnelBlock),
       (0, import_react.createElement)("div", { style: S.sectionLabel }, t("secLan")),
       lanBlock,
       (0, import_react.createElement)("div", { style: S.sectionLabel }, t("adv")),
