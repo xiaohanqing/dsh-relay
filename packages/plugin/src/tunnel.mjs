@@ -186,6 +186,7 @@ export function createTunnelManager({ home, localPort, onChange = () => {}, log 
     emit({
       phase: 'running',
       pid: p.pid,
+      publicUrl: adapter.derivePublicUrl?.(cfg.config) || snap.publicUrl || '',
       detail: adapter.derivePublicUrl?.(cfg.config)
         ? `已启动 ${cfg.tool}`
         : '已启动，等待公网地址… | started, waiting for public url…',
